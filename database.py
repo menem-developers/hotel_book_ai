@@ -304,6 +304,7 @@ class DatabaseManager:
         return res.modified_count > 0
 
 
+
     def delete_room(self, room_id: str, hotel_id: Optional[str] = None) -> bool:
         if not self.is_connected:
             self._connect()
