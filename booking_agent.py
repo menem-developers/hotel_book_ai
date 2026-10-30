@@ -472,7 +472,7 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
         {
             'room_id': 'CORP-STE',
             'exact': ['corporate business suite', 'corporate and business suite', 'corp-ste'],
-            'aliases': ['corporate', 'business', 'suite', 'suites', 'corporate suite', 'business suite', 'corp'],
+            'aliases': ['corporate suite', 'business suite', 'suite', 'suites', 'corp suite', 'business room'],
             'ordinals': ['3', 'third', 'option 3', 'room 3']
         },
         {
@@ -499,6 +499,13 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
             if d.get("room_id") == rid:
                 return d
         return {"room_id": rid, "name": rid, "price_per_night": 100.0}
+
+    # Guard against guest-type phrases (e.g. "Company / Corporate Booking", "individual guest")
+    if any(k in t for k in ["corporate booking", "company booking", "corporate travel", "corporate guest", "individual guest", "individual booking", "company / corporate"]):
+        return (None, "none", 0.0)
+
+    if allow_bare_ordinals and t in ['corporate', 'business', 'corp']:
+        return (get_room_doc('CORP-STE'), "clarify", 1.0)
 
     # Step A: Check exact match
     for rdef in ROOM_DEFINITIONS:
@@ -1020,11 +1027,12 @@ class BookingAgent:
                         extracted['location'] = matched_loc
 
         # 3. Room
-        htl_id = htl['hotel_id'] if htl else session.get('hotel_id')
-        rm, r_type, r_score = check_room_match_with_fuzzy(text, hotel_id=htl_id)
-        if rm and (r_type == 'exact' or r_score >= 0.70):
-            is_confirm = any(k in t for k in ["confirm", "proceed", "yes", "cancel", "skip"]) and not any(k in t for k in ["change room", "edit room", "switch room", "different room"])
-            if not is_confirm:
+        is_guest_type_context = any(k in t for k in ["company", "corporate", "individual", "personal", "booking as", "on behalf"])
+        is_confirm = any(k in t for k in ["confirm", "proceed", "yes", "cancel", "skip"]) and not any(k in t for k in ["change room", "edit room", "switch room", "different room"])
+        if not is_guest_type_context and not is_confirm:
+            htl_id = htl['hotel_id'] if htl else session.get('hotel_id')
+            rm, r_type, r_score = check_room_match_with_fuzzy(text, hotel_id=htl_id, allow_bare_ordinals=False)
+            if rm and (r_type == 'exact' or r_score >= 0.70):
                 extracted['room'] = rm
 
         # 4. Rooms Count
