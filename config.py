@@ -13,7 +13,7 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 
     # MongoDB Settings
-    MONGODB_URI: str = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:27017")
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "mongodb+srv://sanjeevsanju929:sansj%40admin@cluster0.a1bur.mongodb.net/?compressors=zlib")
     MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "hotel_booking")
 
     # Ollama Settings
