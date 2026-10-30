@@ -1,0 +1,43 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+myenv/
+
+# Environment files
+.env
+.env.local
+
+# Python byte code and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Git and GitHub
+.git/
+.gitignore
+.github/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary and log files
+*.log
+scratch/
+brain/
+
+# Test files and scripts
+test_*.py
+
+# Operating system artifacts
+.DS_Store
+Thumbs.db
+desktop.ini

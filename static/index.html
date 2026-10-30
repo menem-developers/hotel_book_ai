@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Northstar Air Service - AI Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+      <!-- Brand Logo -->
+      <div class="sidebar-brand">
+        <div class="brand-logo-box">
+          <i class="fa-solid fa-plane-up"></i>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">northstar</span>
+          <span class="brand-tag">AIR SERVICE</span>
+        </div>
+      </div>
+
+      <!-- CUSTOMER CARE SECTION -->
+      <div class="sidebar-section">
+        <span class="section-label">CUSTOMER CARE</span>
+        <button class="btn-new-convo" id="btn-new-chat" title="Start a fresh conversation">
+          <i class="fa-solid fa-plus"></i>
+          <span>New conversation</span>
+        </button>
+      </div>
+
+      <!-- WORKSPACE SECTION -->
+      <div class="sidebar-section">
+        <span class="section-label">WORKSPACE</span>
+        <nav class="sidebar-nav">
+          <button class="nav-item active" id="nav-service-desk">
+            <i class="fa-regular fa-comment-dots"></i>
+            <span>AI service desk</span>
+          </button>
+          
+          <button class="nav-item" id="nav-bookings-ledger" title="View confirmed bookings ledger">
+            <i class="fa-regular fa-building"></i>
+            <span>Bookings ledger</span>
+          </button>
+          
+          <a href="/admin" class="nav-item" id="nav-control-panel" title="Open Hotel & Inventory Control Panel" style="text-decoration: none;">
+            <i class="fa-solid fa-sliders"></i>
+            <span>Control Panel</span>
+          </a>
+
+          <!-- Try an existing booking card -->
+          <div class="card-sample-booking" id="card-try-booking" title="Test finding an existing booking">
+            <div class="sample-icon">
+              <i class="fa-regular fa-id-card"></i>
+            </div>
+            <div class="sample-info">
+              <span class="sample-title">Try an existing booking</span>
+              <span class="sample-subtitle">Sample: BK-DEMO01</span>
+            </div>
+            <i class="fa-solid fa-arrow-right sample-arrow"></i>
+          </div>
+        </nav>
+      </div>
+
+      <!-- SIDEBAR FOOTER -->
+      <div class="sidebar-footer">
+        <div class="privacy-badge">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Privacy-first assistance</span>
+        </div>
+
+        <div class="user-profile-card">
+          <div class="avatar-circle">AM</div>
+          <div class="user-details">
+            <span class="user-name">Alex Morgan</span>
+            <span class="user-role">Passenger demo</span>
+          </div>
+          <button class="btn-user-menu" title="User options">
+            <i class="fa-solid fa-ellipsis"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN RIGHT WRAPPER -->
+    <div class="main-wrapper">
+      <!-- TOP HEADER BAR -->
+      <header class="top-header">
+        <div class="breadcrumbs">
+          <span class="crumb-parent">Service desk</span>
+          <span class="crumb-separator">/</span>
+          <span class="crumb-active">AI assistant</span>
+        </div>
+
+        <div class="header-right-tools">
+          <div class="demo-badge" id="system-status-badge">
+            <span class="dot-indicator"></span>
+            <span>LIVE DEMO</span>
+          </div>
+          <button class="icon-circle-btn" id="btn-help-faq" title="Help & System Info">
+            <i class="fa-regular fa-circle-question"></i>
+          </button>
+          <div class="avatar-circle sm">AM</div>
+        </div>
+      </header>
+
+      <!-- CHAT SCROLL CANVAS -->
+      <main class="chat-canvas" id="chat-canvas">
+        <div class="chat-inner-column">
+          <!-- Date Separator -->
+          <div class="date-divider">
+            <span class="divider-line"></span>
+            <span class="divider-text">TODAY</span>
+            <span class="divider-line"></span>
+          </div>
+
+          <!-- Message Bubbles Container -->
+          <div class="chat-messages" id="chat-messages">
+            <!-- Messages and In-Chat Cards rendered dynamically -->
+          </div>
+
+          <!-- Typing Indicator -->
+          <div class="assistant-message-row typing-row" id="typing-indicator" style="display: none;">
+            <div class="assistant-avatar">
+              <i class="fa-solid fa-robot"></i>
+            </div>
+            <div class="bubble-wrapper">
+              <div class="assistant-header-line">
+                <span class="assistant-name">Northstar Assistant</span>
+                <span class="assistant-tag">AI</span>
+              </div>
+              <div class="message-bubble assistant-bubble typing-bubble">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- FLOATING CHAT INPUT CARD AT BOTTOM -->
+      <div class="chat-input-wrapper">
+        <div class="chat-input-card">
+          <form id="chat-form">
+            <textarea 
+              id="chat-input" 
+              rows="1" 
+              placeholder="Reply to the assistant..." 
+              autocomplete="off"
+            ></textarea>
+            
+            <div class="input-bottom-bar">
+              <div class="input-tools-left">
+                <!-- Dummy Paperclip Attachment Option as requested -->
+                <button type="button" class="btn-tool-icon" id="btn-attach-dummy" title="Attach file (Demo)">
+                  <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <div class="secure-tag">
+                  <i class="fa-solid fa-shield-halved"></i>
+                  <span>Secure conversation</span>
+                </div>
+                <span class="channel-tag">Text channel</span>
+              </div>
+
+              <div class="input-tools-right">
+                <button type="submit" class="btn-send-arrow" id="btn-send" title="Send message">
+                  <i class="fa-solid fa-arrow-up"></i>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+        <p class="chat-disclaimer">
+          AI responses can be inaccurate. Confirm bookings and policy with an authorized agent.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: BOOKINGS LEDGER -->
+  <div class="modal-overlay" id="bookings-modal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">
+            <i class="fa-regular fa-building"></i>
+          </div>
+          <div>
+            <h3>Bookings Ledger</h3>
+            <p>Live MongoDB reservations record with instant management</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-modal">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="table-search-bar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="ledger-search-input" placeholder="Search by Booking ID, Guest, City, or Hotel...">
+        </div>
+        <div class="table-responsive" id="bookings-table-container">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

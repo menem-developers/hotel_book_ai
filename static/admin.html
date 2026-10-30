@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Northstar Air Service - Control Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* Admin Specific Styling (Unified with Northstar Theme) */
+    .admin-main-canvas {
+      flex: 1;
+      height: 100%;
+      overflow-y: auto;
+      background-color: var(--bg-app);
+      padding: 28px 36px 60px 36px;
+    }
+
+    .admin-container {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Page Header Banner */
+    .admin-page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary-light);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+      border-radius: 9999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .admin-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.5px;
+    }
+
+    .admin-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .btn-northstar-outline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn-northstar-outline:hover {
+      background: var(--primary-light);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    /* Stats Grid */
+    .northstar-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 16px;
+    }
+
+    .northstar-stat-card {
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .northstar-stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .stat-icon-pill {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--primary-light);
+      border: 1px solid var(--primary-border);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .stat-meta {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stat-num {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text-main);
+      line-height: 1.2;
+    }
+
+    .stat-lbl {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Tab Switcher Row */
+    .northstar-tabs-row {
+      display: flex;
+      gap: 10px;
+      background: #ffffff;
+      padding: 8px;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-sm);
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn:hover {
+      background: var(--primary-light);
+      color: var(--primary);
+    }
+
+    .tab-btn.active {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 2px 6px rgba(13, 148, 136, 0.25);
+    }
+
+    /* Tab Content Cards */
+    .tab-content {
+      display: none;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    .northstar-admin-card {
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+
+    .card-header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .card-header-bar h3 {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-header-bar h3 i {
+      color: var(--primary);
+    }
+
+    /* Modern Forms */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+
+    .form-group input, 
+    .form-group select, 
+    .form-group textarea {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .form-group input:focus, 
+    .form-group select:focus, 
+    .form-group textarea:focus {
+      background: #ffffff;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+    }
+
+    .btn-northstar-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--primary);
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 20px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(13, 148, 136, 0.25);
+      transition: background-color 0.15s, transform 0.1s;
+    }
+
+    .btn-northstar-primary:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+
+    /* Stepper & Badges */
+    .count-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #f8fafc;
+      border: 1px solid var(--border-color);
+      padding: 3px 6px;
+      border-radius: 6px;
+    }
+
+    .count-btn {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: var(--primary);
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 800;
+      transition: all 0.15s;
+    }
+
+    .count-btn:hover {
+      background: var(--primary-light);
+      border-color: var(--primary);
+    }
+
+    .count-val {
+      font-weight: 800;
+      min-width: 24px;
+      text-align: center;
+    }
+
+    .badge-code {
+      display: inline-block;
+      background: var(--primary-light);
+      color: var(--primary);
+      border: 1px solid var(--primary-border);
+      font-weight: 700;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+    }
+
+    .badge-yes {
+      display: inline-block;
+      background: #ecfdf5;
+      color: #059669;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+    }
+
+    .badge-no {
+      display: inline-block;
+      background: #f1f5f9;
+      color: #64748b;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- LEFT SIDEBAR (Identical to Main Page) -->
+    <aside class="sidebar">
+      <!-- Brand Logo -->
+      <div class="sidebar-brand">
+        <div class="brand-logo-box">
+          <i class="fa-solid fa-plane-up"></i>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">northstar</span>
+          <span class="brand-tag">AIR SERVICE</span>
+        </div>
+      </div>
+
+      <!-- CUSTOMER CARE SECTION -->
+      <div class="sidebar-section">
+        <span class="section-label">CUSTOMER CARE</span>
+        <a href="/" class="btn-new-convo" id="btn-new-chat" title="Start a fresh conversation" style="text-decoration: none;">
+          <i class="fa-solid fa-plus"></i>
+          <span>New conversation</span>
+        </a>
+      </div>
+
+      <!-- WORKSPACE SECTION -->
+      <div class="sidebar-section">
+        <span class="section-label">WORKSPACE</span>
+        <nav class="sidebar-nav">
+          <a href="/" class="nav-item" id="nav-service-desk" style="text-decoration: none;">
+            <i class="fa-regular fa-comment-dots"></i>
+            <span>AI service desk</span>
+          </a>
+          
+          <a href="/#ledger" class="nav-item" id="nav-bookings-ledger" title="View confirmed bookings ledger" style="text-decoration: none;">
+            <i class="fa-regular fa-building"></i>
+            <span>Bookings ledger</span>
+          </a>
+          
+          <a href="/admin" class="nav-item active" id="nav-control-panel" title="Hotel & Inventory Control Panel" style="text-decoration: none;">
+            <i class="fa-solid fa-sliders"></i>
+            <span>Control Panel</span>
+          </a>
+
+          <!-- Try an existing booking card -->
+          <a href="/" class="card-sample-booking" id="card-try-booking" title="Test finding an existing booking" style="text-decoration: none;">
+            <div class="sample-icon">
+              <i class="fa-regular fa-id-card"></i>
+            </div>
+            <div class="sample-info">
+              <span class="sample-title">Try an existing booking</span>
+              <span class="sample-subtitle">Sample: BK-DEMO01</span>
+            </div>
+            <i class="fa-solid fa-arrow-right sample-arrow"></i>
+          </a>
+        </nav>
+      </div>
+
+      <!-- SIDEBAR FOOTER -->
+      <div class="sidebar-footer">
+        <div class="privacy-badge">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Privacy-first assistance</span>
+        </div>
+
+        <div class="user-profile-card">
+          <div class="avatar-circle">AM</div>
+          <div class="user-details">
+            <span class="user-name">Alex Morgan</span>
+            <span class="user-role">Passenger demo</span>
+          </div>
+          <button class="btn-user-menu" title="User options">
+            <i class="fa-solid fa-ellipsis"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN RIGHT WRAPPER -->
+    <div class="main-wrapper">
+      <!-- TOP HEADER BAR -->
+      <header class="top-header">
+        <div class="breadcrumbs">
+          <span class="crumb-parent">Service desk</span>
+          <span class="crumb-separator">/</span>
+          <span class="crumb-active">Control panel</span>
+        </div>
+
+        <div class="header-right-tools">
+          <div class="demo-badge" id="system-status-badge">
+            <span class="dot-indicator"></span>
+            <span>LIVE DEMO</span>
+          </div>
+          <a href="/" class="icon-circle-btn" title="Back to Chat Desk">
+            <i class="fa-regular fa-comment-dots"></i>
+          </a>
+          <div class="avatar-circle sm">AM</div>
+        </div>
+      </header>
+
+      <!-- MAIN CONTENT CANVAS -->
+      <main class="admin-main-canvas">
+        <div class="admin-container">
+          <!-- Page Header Banner -->
+          <div class="admin-page-header">
+            <div class="admin-page-title-box">
+              <span class="admin-badge"><i class="fa-solid fa-sliders"></i> System Management</span>
+              <h1 class="admin-title">Hotel & Inventory Control Panel</h1>
+              <p class="admin-desc">Configure airport hubs, luxury hotels, live room availability, and guest reservations recorded in MongoDB.</p>
+            </div>
+            <div class="admin-header-actions">
+              <a href="/" class="btn-northstar-outline"><i class="fa-solid fa-comments"></i> Return to Chat Desk</a>
+            </div>
+          </div>
+
+          <!-- Top Stats Bar -->
+          <div class="northstar-stats-grid">
+            <div class="northstar-stat-card">
+              <div class="stat-icon-pill"><i class="fa-solid fa-plane-arrival"></i></div>
+              <div class="stat-meta">
+                <span class="stat-num" id="stat-locations-count">0</span>
+                <span class="stat-lbl">Airport Hubs</span>
+              </div>
+            </div>
+            <div class="northstar-stat-card">
+              <div class="stat-icon-pill"><i class="fa-solid fa-hotel"></i></div>
+              <div class="stat-meta">
+                <span class="stat-num" id="stat-hotels-count">0</span>
+                <span class="stat-lbl">Luxury Hotels</span>
+              </div>
+            </div>
+            <div class="northstar-stat-card">
+              <div class="stat-icon-pill"><i class="fa-solid fa-bed"></i></div>
+              <div class="stat-meta">
+                <span class="stat-num" id="stat-rooms-count">0</span>
+                <span class="stat-lbl">Room Categories</span>
+              </div>
+            </div>
+            <div class="northstar-stat-card">
+              <div class="stat-icon-pill"><i class="fa-solid fa-receipt"></i></div>
+              <div class="stat-meta">
+                <span class="stat-num" id="stat-bookings-count">0</span>
+                <span class="stat-lbl">Confirmed Bookings</span>
+              </div>
+            </div>
+            <div class="northstar-stat-card">
+              <div class="stat-icon-pill"><i class="fa-solid fa-car-side"></i></div>
+              <div class="stat-meta">
+                <span class="stat-num" id="stat-transfers-count">0</span>
+                <span class="stat-lbl">Chauffeur Transfers</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Navigation Tabs -->
+          <div class="northstar-tabs-row">
+            <button type="button" class="tab-btn active" onclick="switchAdminTab('locations')">
+              <i class="fa-solid fa-plane-arrival"></i> Airport Locations
+            </button>
+            <button type="button" class="tab-btn" onclick="switchAdminTab('hotels')">
+              <i class="fa-solid fa-hotel"></i> Hotels
+            </button>
+            <button type="button" class="tab-btn" onclick="switchAdminTab('rooms')">
+              <i class="fa-solid fa-bed"></i> Rooms & Inventory
+            </button>
+            <button type="button" class="tab-btn" onclick="switchAdminTab('bookings')">
+              <i class="fa-solid fa-calendar-check"></i> Bookings & Availability
+            </button>
+          </div>
+
+          <!-- TAB 1: LOCATIONS -->
+          <div class="tab-content active" id="tab-locations">
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-plus-circle"></i> Add New Airport Destination Location</h3>
+              </div>
+              <form id="form-add-location" onsubmit="handleAddLocation(event)">
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>City Name</label>
+                    <input type="text" id="loc-city" placeholder="e.g. Hyderabad" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Airport Name</label>
+                    <input type="text" id="loc-airport-name" placeholder="e.g. Rajiv Gandhi International Airport" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Airport Code</label>
+                    <input type="text" id="loc-airport-code" placeholder="e.g. HYD" maxlength="4" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Country / State</label>
+                    <input type="text" id="loc-country" placeholder="e.g. India" required>
+                  </div>
+                </div>
+                <div style="margin-top: 18px;">
+                  <button type="submit" class="btn-northstar-primary">
+                    <i class="fa-solid fa-check"></i> Save Location to MongoDB
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-map-pin"></i> Active Airport Destinations</h3>
+              </div>
+              <div style="overflow-x: auto;">
+                <table class="ledger-table" id="table-locations">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>City</th>
+                      <th>Airport Code</th>
+                      <th>Airport Name</th>
+                      <th>Country</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-locations">
+                    <!-- Rendered via JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: HOTELS -->
+          <div class="tab-content" id="tab-hotels">
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-plus-circle"></i> Add New Hotel</h3>
+              </div>
+              <form id="form-add-hotel" onsubmit="handleAddHotel(event)">
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>Destination Location</label>
+                    <select id="hotel-location-select" required>
+                      <!-- Populated via JS -->
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Hotel Name</label>
+                    <input type="text" id="hotel-name" placeholder="e.g. Grand Azure Cyber Tower" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Address / Proximity</label>
+                    <input type="text" id="hotel-address" placeholder="e.g. HITEC City Blvd, 2.5 km to Airport" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Rating (1.0 to 5.0)</label>
+                    <input type="number" step="0.1" id="hotel-rating" value="4.8" min="1" max="5" required>
+                  </div>
+                  <div class="form-group" style="grid-column: span 2;">
+                    <label>Description & Highlights</label>
+                    <input type="text" id="hotel-desc" placeholder="5-star retreat with dedicated 24/7 airport chauffeur" required>
+                  </div>
+                </div>
+                <div style="margin-top: 18px;">
+                  <button type="submit" class="btn-northstar-primary">
+                    <i class="fa-solid fa-check"></i> Save Hotel to MongoDB
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-hotel"></i> Registered Hotels</h3>
+              </div>
+              <div style="overflow-x: auto;">
+                <table class="ledger-table" id="table-hotels">
+                  <thead>
+                    <tr>
+                      <th>Hotel ID</th>
+                      <th>Hotel Name</th>
+                      <th>Location</th>
+                      <th>Address</th>
+                      <th>Rating</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-hotels">
+                    <!-- Rendered via JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: ROOMS & INVENTORY -->
+          <div class="tab-content" id="tab-rooms">
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-sliders"></i> Add / Configure Room Category</h3>
+              </div>
+              <form id="form-add-room" onsubmit="handleAddRoom(event)">
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>Hotel</label>
+                    <select id="room-hotel-select" required>
+                      <!-- Populated via JS -->
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Room Name</label>
+                    <input type="text" id="room-name" placeholder="e.g. Luxury Family & Team Villa" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Category</label>
+                    <select id="room-category">
+                      <option value="Standard">Standard</option>
+                      <option value="Executive">Executive</option>
+                      <option value="Business">Business</option>
+                      <option value="Villa">Villa</option>
+                      <option value="Luxury">Luxury</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Price / Night ($)</label>
+                    <input type="number" id="room-price" value="150" min="20" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Max Capacity (Guests)</label>
+                    <input type="number" id="room-capacity" value="2" min="1" max="10" required>
+                  </div>
+                  <div class="form-group">
+                    <label>Total Room Inventory Count</label>
+                    <input type="number" id="room-total" value="10" min="0" max="100" required>
+                  </div>
+                </div>
+                <div style="margin-top: 18px;">
+                  <button type="submit" class="btn-northstar-primary">
+                    <i class="fa-solid fa-check"></i> Add / Save Room Category
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-cubes-stacked"></i> Live Room Inventory (Click + / - to Adjust Room Count)</h3>
+                <div class="form-group" style="width: 260px; margin: 0;">
+                  <select id="filter-room-hotel" onchange="loadRoomsTable()">
+                    <option value="">All Hotels</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style="overflow-x: auto;">
+                <table class="ledger-table" id="table-rooms">
+                  <thead>
+                    <tr>
+                      <th>Room Type</th>
+                      <th>Hotel</th>
+                      <th>Price/nt</th>
+                      <th>Capacity</th>
+                      <th>Total Room Count (Inventory)</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-rooms">
+                    <!-- Rendered via JS with live count stepper -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 4: BOOKINGS & AVAILABILITY -->
+          <div class="tab-content" id="tab-bookings">
+            <!-- Date Overlap Availability Calculator -->
+            <div class="northstar-admin-card" style="border-left: 4px solid var(--primary);">
+              <div class="card-header-bar">
+                <div>
+                  <h3><i class="fa-solid fa-magnifying-glass"></i> Date-Specific Room Availability Calculator</h3>
+                  <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                    Verifies real-time room capacity vs existing confirmed bookings recorded in MongoDB.
+                  </p>
+                </div>
+              </div>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Hotel</label>
+                  <select id="avail-hotel-select"></select>
+                </div>
+                <div class="form-group">
+                  <label>Room Category</label>
+                  <select id="avail-room-select">
+                    <option value="DLX-SGL">Deluxe Single Room</option>
+                    <option value="EXE-DBL">Executive Double Room</option>
+                    <option value="CORP-STE">Corporate Business Suite</option>
+                    <option value="FAM-VLA">Luxury Family & Team Villa</option>
+                    <option value="PRES-PNT">Presidential Penthouse Suite</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Check-in Date</label>
+                  <input type="date" id="avail-cin">
+                </div>
+                <div class="form-group">
+                  <label>Check-out Date</label>
+                  <input type="date" id="avail-cout">
+                </div>
+                <div class="form-group">
+                  <label>Rooms Needed</label>
+                  <input type="number" id="avail-rooms-needed" value="1" min="1" max="20">
+                </div>
+              </div>
+              <div style="margin-top: 18px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                <button type="button" class="btn-northstar-primary" onclick="testDateAvailability()">
+                  <i class="fa-solid fa-calculator"></i> Check Dates Availability
+                </button>
+                <div id="avail-result-box" style="font-size: 13px; font-weight: 700;"></div>
+              </div>
+            </div>
+
+            <!-- Confirmed Bookings Ledger -->
+            <div class="northstar-admin-card">
+              <div class="card-header-bar">
+                <h3><i class="fa-solid fa-receipt"></i> Confirmed Bookings Ledger</h3>
+              </div>
+              <div style="overflow-x: auto;">
+                <table class="ledger-table">
+                  <thead>
+                    <tr>
+                      <th>Booking Ref</th>
+                      <th>Destination & Hotel</th>
+                      <th>Guest / Company</th>
+                      <th>Room Reserved</th>
+                      <th>Dates & Nights</th>
+                      <th>Airport Transfer</th>
+                      <th>Total Paid</th>
+                      <th>Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbody-bookings">
+                    <!-- Rendered via JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>
