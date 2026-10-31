@@ -54,7 +54,7 @@ async def test_specific_inquiries():
         "location_city": "New York",
         "airport_code": "JFK",
         "hotel_id": "HTL-JFK-001",
-        "hotel_name": "Grand Azure JFK Runway Palace & Spa",
+        "hotel_name": "JFK Runway Palace & Spa",
         "hotel_address": "JFK Access Road, Queens, New York, NY 11430 (1 km to JFK Terminal 4)",
         "guest_type": "company",
         "guest_name": "Alex Morgan",
@@ -83,7 +83,7 @@ async def test_specific_inquiries():
     print("\n--- User Query: 'when my checkin is there and which hotel' ---")
     print("REPLY:\n" + res["reply"])
     
-    assert "Grand Azure Airport Palace & Spa" in res["reply"]
+    assert "JFK Runway Palace & Spa" in res["reply"]
     assert "2026-10-29" in res["reply"]
     assert "2026-10-30" in res["reply"]
     assert "BK-AC9EF9" in res["reply"]
@@ -93,8 +93,8 @@ async def test_specific_inquiries():
 
     # Test 'which hotel'
     res_hotel = await booking_agent.process_user_message(sid, "which hotel")
-    assert "Grand Azure Airport Palace & Spa" in res_hotel["reply"]
-    assert "GST Road" in res_hotel["reply"]
+    assert "JFK Runway Palace & Spa" in res_hotel["reply"]
+    assert "JFK Access Road" in res_hotel["reply"]
     print("✅ 'which hotel' returned property name and address")
 
     # Test 'when is my checkin'

@@ -59,7 +59,7 @@ DISALLOWED_COMPANIES = {
 
 HOTEL_FAQ_KNOWLEDGE = {
     "checkin_time": "Our standard check-in time is **3:00 PM** and check-out is **11:00 AM**. Early check-in or late check-out is available upon request subject to availability.",
-    "amenities": "Grand Azure Hotels feature 5-star amenities including an infinity swimming pool, wellness spa & sauna, 24/7 fitness center, Michelin-inspired dining, rooftop cocktail lounge, high-speed fiber Wi-Fi, and private airport chauffeur transfers.",
+    "amenities": "Our luxury partner hotels feature 5-star amenities including an infinity swimming pool, wellness spa & sauna, 24/7 fitness center, Michelin-inspired dining, rooftop cocktail lounge, high-speed fiber Wi-Fi, and private airport chauffeur transfers.",
     "breakfast": "Complimentary gourmet buffet breakfast is served daily from **6:30 AM to 10:30 AM** at our signature restaurant.",
     "cancellation": "We offer **free cancellation up to 24 hours prior** to your scheduled check-in date.",
     "wifi": "Complimentary high-speed Wi-Fi (up to 500 Mbps) is available in all rooms, suites, and public areas.",
@@ -839,7 +839,7 @@ class BookingAgent:
         return (
             f"📋 **Booking Details**: **{booking.get('booking_id')}**\n\n"
             f"• **Status**: ✅ Confirmed\n"
-            f"• **Hotel**: {booking.get('hotel_name', 'Grand Azure Hotel')}\n"
+            f"• **Hotel**: {booking.get('hotel_name', 'Luxury Hotel')}\n"
             f"• **Location**: {booking.get('location_city', 'City')} ({booking.get('airport_code', 'Airport')})\n"
             f"• **Guest / Org**: {booking.get('guest_name', 'Guest')}{company_line}\n"
             f"• **Rooms Reserved**: {booking.get('rooms_count', 1)} x {booking.get('room_name')}\n"
@@ -870,7 +870,7 @@ class BookingAgent:
         if (asks_checkin or asks_checkout) and asks_hotel:
             return (
                 f"For your confirmed reservation (**{booking.get('booking_id')}**):\n\n"
-                f"🏨 **Hotel**: **{booking.get('hotel_name', 'Grand Azure Hotel')}**\n"
+                f"🏨 **Hotel**: **{booking.get('hotel_name', 'Luxury Hotel')}**\n"
                 f"📍 **Address / Location**: {addr}\n"
                 f"📅 **Check-in Date**: **{booking.get('checkin_date')}** (Standard check-in from 2:00 PM)\n"
                 f"📅 **Check-out Date**: **{booking.get('checkout_date')}** ({booking.get('total_nights', 1)} night{'s' if booking.get('total_nights', 1) > 1 else ''})\n\n"
@@ -1222,7 +1222,7 @@ class BookingAgent:
         return (
             f"📋 **Booking Summary & Review**:\n\n"
             f"• **Destination / Airport**: {session.get('location_city', 'Destination')} ({session.get('airport_code', '')})\n"
-            f"• **Hotel**: {session.get('hotel_name', 'Grand Azure Hotel')}\n"
+            f"• **Hotel**: {session.get('hotel_name', 'Luxury Hotel')}\n"
             f"• **Guest / Organization**: {guest_display}\n"
             f"• **Booking Type**: {'Corporate / Company' if session.get('guest_type') == 'company' else 'Individual Guest'}\n"
             f"• **Total Guests**: {session.get('total_members', 1)}\n"
@@ -1290,7 +1290,7 @@ class BookingAgent:
             room_list_str = self.format_room_options_text(hotel_id=session.get("hotel_id"))
             reply = (
                 f"{extra_prefix}"
-                f"Here are our available room categories at **{session.get('hotel_name', 'Grand Azure Hotel')}**:\n\n"
+                f"Here are our available room categories at **{session.get('hotel_name', 'Luxury Hotel')}**:\n\n"
                 f"{room_list_str}\n\n"
                 f"**Which room type would you prefer for your stay?**"
             )
@@ -1410,7 +1410,7 @@ class BookingAgent:
         if any(k in user_text.lower() for k in ["restart", "reset", "start over", "cancel booking", "new booking", "another booking"]):
             session = self.reset_session(session["session_id"])
             reply = (
-                "Welcome to **Grand Azure Luxury Hotels & Residences**! 🌟\n\n"
+                "Welcome to **Northstar Airline Assistance**! 🌟\n\n"
                 "As you are arriving from the airport, **which city or airport destination are you traveling to?**"
             )
             quick_replies = self.get_location_quick_replies()
@@ -1841,7 +1841,7 @@ class BookingAgent:
             members = session.get("total_members")
             rooms_cnt = session.get("rooms_count")
 
-            prefix = f"Here are the luxury rooms available at **{session.get('hotel_name', 'Grand Azure Hotel')}**:\n\n"
+            prefix = f"Here are the luxury rooms available at **{session.get('hotel_name', 'Luxury Hotel')}**:\n\n"
             suffix = ""
             if members and not rooms_cnt:
                 suffix = f"\n\nFor your group of **{members} guests**, how many rooms would you like to book, or which room type do you prefer?"
@@ -2551,7 +2551,7 @@ class BookingAgent:
                     "location_city": session.get("location_city"),
                     "airport_code": session.get("airport_code"),
                     "hotel_id": session.get("hotel_id", "HTL-JFK-001"),
-                    "hotel_name": session.get("hotel_name", "Grand Azure Hotel"),
+                    "hotel_name": session.get("hotel_name", "Luxury Hotel"),
                     "hotel_address": session.get("hotel_address") or (db_manager.get_hotel_by_id(session.get("hotel_id")) or {}).get("address", ""),
                     "guest_type": session.get("guest_type", "individual"),
                     "guest_name": session.get("guest_name") or session.get("company_name") or "Valued Guest",
@@ -2588,7 +2588,7 @@ class BookingAgent:
                     f"We have reserved {session.get('rooms_count')} x {session.get('room_name')} at **{session.get('hotel_name')}** "
                     f"from **{session.get('checkin_date')}** to **{session.get('checkout_date')}** ({session.get('total_nights')} nights).\n\n"
                     f"Airport Chauffeur: {'Pick-up & Drop-off confirmed' if session.get('airport_pickup') and session.get('airport_drop') else ('Pick-up confirmed' if session.get('airport_pickup') else ('Drop-off confirmed' if session.get('airport_drop') else 'No airport transfers'))}.\n\n"
-                    f"We look forward to giving you an exceptional stay at Grand Azure Hotel!"
+                    f"We look forward to giving you an exceptional stay at {session.get('hotel_name', 'our partner hotel')}!"
                 )
                 quick_replies = ["📋 View My Booking Details", "🏨 Book Another Room"]
 

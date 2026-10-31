@@ -32,11 +32,11 @@ async def run_full_test():
     res = await booking_agent.process_user_message(session_id, "I am arriving at New York airport JFK")
     print("\n[User]: I am arriving at New York airport JFK")
     print(f"[AI Step: {res['current_step']}]:\n{res['reply'][:180]}...")
-    assert "Grand Azure JFK Runway Palace" in res["reply"] or "New York" in res["reply"], "Expected hotel list in New York"
+    assert "JFK Runway Palace" in res["reply"] or "New York" in res["reply"], "Expected hotel list in New York"
 
     # Turn 2: User selects hotel
-    res = await booking_agent.process_user_message(session_id, "Grand Azure JFK Runway Palace")
-    print("\n[User]: Grand Azure JFK Runway Palace")
+    res = await booking_agent.process_user_message(session_id, "JFK Runway Palace")
+    print("\n[User]: JFK Runway Palace")
     print(f"[AI Step: {res['current_step']}]:\n{res['reply']}")
     assert "individual" in res["reply"].lower() or "company" in res["reply"].lower()
 

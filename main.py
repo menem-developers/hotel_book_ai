@@ -182,7 +182,7 @@ async def reset_chat(req: ResetRequest):
     }
 
     welcome_text = (
-        "Welcome to **Grand Azure Luxury Hotels & Residences**! 🌟\n\n"
+        "Welcome to **Northstar Airline Assistance**! 🌟\n\n"
         "Let's start fresh. Since you are arriving from the airport, **which city or airport destination are you traveling to?**"
     )
     session.setdefault("messages", []).append({
