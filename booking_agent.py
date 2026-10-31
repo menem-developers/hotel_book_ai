@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from difflib import SequenceMatcher
-from database import db_manager
+from database import db_manager, DEFAULT_ROOMS_TEMPLATE
 from ollama_client import ollama_client
 import logging
 
@@ -130,6 +130,20 @@ def is_inquiring_about_rooms(text: str) -> bool:
 def is_inquiring_about_booking(text: str, has_active_booking: bool = False) -> bool:
     """Check if user is asking for their booking details / reservation status or specific questions."""
     t = text.lower().strip()
+
+    # 0. Check if this is an edit / change / modify intent - NEVER treat as booking lookup inquiry
+    edit_patterns = [
+        r"\bedit\b",
+        r"\bchange\b",
+        r"\bmodify\b",
+        r"\bswitch\b",
+        r"\balter\b",
+        r"\bcorrect\b",
+        r"\bdifferent\b",
+        r"\bupdate\b(?!\s+(?:on|about|of)\b)"
+    ]
+    if any(re.search(p, t) for p in edit_patterns):
+        return False
     
     # 1. Direct booking reference regex (e.g. BK-AC9EF9)
     if re.search(r"\bbk-[a-z0-9]{4,8}\b", t):
@@ -939,8 +953,8 @@ class BookingAgent:
         if any(re.search(p, t) for p in loc_pats):
             return "location"
 
-        # 3. ROOM check (ensuring 'not room' or 'not the room' wasn't used)
-        if 'not room' not in t and 'not the room' not in t and 'not rooms' not in t:
+        # 3. ROOM check (ensuring 'not room' or 'not the room' or 'count' wasn't used)
+        if 'not room' not in t and 'not the room' not in t and 'not rooms' not in t and 'count' not in t:
             room_pats = [
                 r'\b(?:change|different|switch|another|other|wrong|modify|edit)\b.*\b(?:room|rooms|suite|suites|villa|villas|category|room\s*type)\b',
                 r'\b(?:room|rooms|suite|suites|villa|villas|category|room\s*type)\b.*\b(?:change|different|switch|another|other|wrong|modify|edit)\b',
@@ -958,7 +972,15 @@ class BookingAgent:
         if any(re.search(p, t) for p in date_pats):
             return "dates"
 
-        # 5. VEHICLE / TRANSFERS check
+        # 5. FOOD / DINING check
+        food_pats = [
+            r'\b(?:change|different|switch|another|other|wrong|modify|edit)\b.*\b(?:food|meal|meals|dining|breakfast|lunch|dinner|menu)\b',
+            r'\b(?:food|meal|meals|dining|breakfast|lunch|dinner|menu)\b.*\b(?:change|different|switch|another|other|wrong|modify|edit)\b'
+        ]
+        if any(re.search(p, t) for p in food_pats):
+            return "food"
+
+        # 6. VEHICLE / TRANSFERS check
         veh_pats = [
             r'\b(?:change|different|switch|another|other|wrong|modify|edit)\b.*\b(?:vehicle|pickup|pick-up|drop|drop-off|transfer|chauffeur|car|cab|transportation)\b',
             r'\b(?:vehicle|pickup|pick-up|drop|drop-off|transfer|chauffeur|car|cab|transportation)\b.*\b(?:change|different|switch|another|other|wrong|modify|edit)\b'
@@ -966,7 +988,7 @@ class BookingAgent:
         if any(re.search(p, t) for p in veh_pats):
             return "vehicle"
 
-        # 6. GUEST NAME / COMPANY check
+        # 7. GUEST NAME / COMPANY check
         name_pats = [
             r'\b(?:change|different|switch|another|other|wrong|modify|edit)\b.*\b(?:name|guest|company|organization)\b',
             r'\b(?:name|guest|company|organization)\b.*\b(?:change|different|switch|another|other|wrong|modify|edit)\b'
@@ -974,23 +996,33 @@ class BookingAgent:
         if any(re.search(p, t) for p in name_pats):
             return "name"
 
-        # 7. ROOMS COUNT check
+        # 8. ROOMS COUNT check
         count_pats = [
             r'\b(?:change|modify|edit)\b.*\b(?:room\s*count|rooms\s*count|number\s*of\s*rooms?)\b',
-            r'\b(?:make\s+it|want|need)\s+(\d+)\s+rooms?\b'
+            r'\b(?:room\s*count|rooms\s*count|number\s*of\s*rooms?)\b.*\b(?:change|modify|edit)\b',
+            r'\b(?:make\s+it|want|need|change\s+to)\s+(\d+)\s+rooms?\b'
         ]
         if any(re.search(p, t) for p in count_pats):
             return "rooms_count"
 
-        # 8. MEMBERS / GUESTS COUNT check
-        mem_pats = [
-            r'\b(?:change|modify|edit)\b.*\b(?:guests?|members?|people|pax)\b'
-        ]
-        if any(re.search(p, t) for p in mem_pats):
-            return "members_count"
+        # 9. MEMBERS / GUESTS COUNT check
+        if 'name' not in t:
+            mem_pats = [
+                r'\b(?:change|modify|edit)\b.*\b(?:guest\s*count|guests\s*count|members?\s*count|number\s*of\s*guests?|pax|people)\b',
+                r'\b(?:guest\s*count|guests\s*count|members?\s*count|number\s*of\s*guests?|pax|people)\b.*\b(?:change|modify|edit)\b',
+                r'\b(?:make\s+it|want|need|change\s+to)\s+(\d+)\s+(?:guests?|members?|people)\b'
+            ]
+            if any(re.search(p, t) for p in mem_pats):
+                return "members_count"
 
-        # 9. GENERIC CHANGE / EDIT (e.g. user simply says 'edit', 'change', 'modify', 'edit details')
-        if any(re.search(rf'\b{re.escape(k)}\b', t) for k in ['edit', 'change', 'modify', 'edit details', 'change details']):
+        # 10. GENERIC CHANGE / EDIT (e.g. user simply says 'edit', 'change', 'modify', 'edit details', 'edit booking details')
+        generic_keywords = [
+            'edit', 'change', 'modify', 'alter',
+            'edit details', 'change details', 'modify details',
+            'edit booking', 'change booking', 'modify booking',
+            'edit booking details', 'change booking details', 'modify booking details'
+        ]
+        if any(re.search(rf'\b{re.escape(k)}\b', t) for k in generic_keywords):
             return "generic"
 
         return None
@@ -1318,9 +1350,17 @@ class BookingAgent:
             reply = (
                 f"{extra_prefix}"
                 "**Which booking detail would you like to update?**\n\n"
-                "You can select an option below or simply tell me (e.g. *'change hotel'*, *'change dates'*, *'change room'*, *'make it 3 rooms'*):"
+                "You can select an option below or simply tell me (e.g. *'change hotel'*, *'change dates'*, *'change room'*, *'change food'*, *'make it 3 rooms'*):"
             )
-            return reply, ["🏨 Change Hotel", "🛏️ Change Room Type", "📅 Change Stay Dates", "🚘 Change Vehicle", "👤 Change Guest Name", "🔢 Change Room Count"], None
+            return reply, [
+                "🏨 Change Hotel",
+                "🛏️ Change Room Type",
+                "📅 Change Stay Dates",
+                "🍽️ Change Food Preference",
+                "🚘 Change Vehicle",
+                "👤 Change Guest Name",
+                "🔢 Change Room Count"
+            ], None
 
         # Fallback
         return "How may I assist you with your booking?", [], None
@@ -1522,6 +1562,14 @@ class BookingAgent:
                     reply, quick_replies, options_data = self.prompt_for_step(
                         STEP_ASK_MEMBERS_COUNT, session, extra_prefix="Understood! "
                     )
+
+            elif change_target == "food":
+                session["food_preference"] = None
+                session["food_included"] = None
+                session["current_step"] = STEP_ASK_FOOD
+                reply, quick_replies, options_data = self.prompt_for_step(
+                    STEP_ASK_FOOD, session, extra_prefix="Understood! Let's update your dining & food preference.\n\n"
+                )
 
             elif change_target == "generic":
                 reply, quick_replies, options_data = self.prompt_for_step("EDIT_MENU", session)
@@ -2538,6 +2586,31 @@ class BookingAgent:
                     "quick_replies": quick_replies,
                     "booking": None,
                     "options": options_data
+                }
+            elif any(k in lower for k in ["cancel"]):
+                session = self.reset_session(session["session_id"])
+                reply = (
+                    "Booking cancelled. Welcome back to **Northstar Airline Assistance**! 🌟\n\n"
+                    "Which city or airport destination would you like to search for hotels near?"
+                )
+                quick_replies = self.get_location_quick_replies()
+                session.setdefault("messages", []).append({
+                    "role": "assistant",
+                    "content": reply,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                db_manager.save_session(session["session_id"], session)
+                return {
+                    "session_id": session["session_id"],
+                    "reply": reply,
+                    "current_step": STEP_ASK_LOCATION,
+                    "state": session,
+                    "quick_replies": quick_replies,
+                    "booking": None,
+                    "options": {
+                        "type": "locations",
+                        "items": db_manager.get_all_locations()
+                    }
                 }
             else:
                 reply = "Please let me know if you would like to proceed with the booking (Yes) or make any changes (Edit)."
