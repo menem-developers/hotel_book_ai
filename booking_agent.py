@@ -2023,15 +2023,12 @@ class BookingAgent:
 
         elif step == STEP_ASK_HOTEL:
             hotels = db_manager.get_all_hotels(location_id=session.get("location_id"))
-            hotel_lines = [f"🏨 **{h['name']}**\n   • Location: {h['address']}\n   • Rating: {h['rating']}⭐\n   • {h['description']}" for h in hotels]
-            display = "\n\n".join(hotel_lines)
             city_name = session.get('location_city', 'your destination')
             code = session.get('airport_code', '')
             label = f"{city_name} ({code})" if code else city_name
             reply = (
                 f"{extra_prefix}"
-                f"We have luxury properties connected to **{label}**:\n\n"
-                f"{display}\n\n"
+                f"We have luxury properties connected to **{label}**.\n\n"
                 f"**Which hotel would you prefer to stay at?**"
             )
             return reply, self.get_hotel_quick_replies(session.get("location_id")), {
@@ -2065,7 +2062,11 @@ class BookingAgent:
                 f"{extra_prefix}"
                 f"Which room type would you prefer for your stay at **{session.get('hotel_name', 'our hotel')}**?"
             )
-            return reply, self.get_room_quick_replies(session.get("hotel_id")), None
+            return reply, self.get_room_quick_replies(session.get("hotel_id")), {
+                "type": "rooms",
+                "hotel_name": session.get("hotel_name"),
+                "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+            }
 
         elif step == STEP_ASK_CHECKIN_DATE:
             reply = (
@@ -2427,13 +2428,21 @@ class BookingAgent:
                 "timestamp": datetime.utcnow().isoformat()
             })
             db_manager.save_session(session["session_id"], session)
+            room_options = None
+            if session.get("current_step") == STEP_ASK_ROOM_TYPE:
+                room_options = {
+                    "type": "rooms",
+                    "hotel_name": session.get("hotel_name"),
+                    "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+                }
             return {
                 "session_id": session["session_id"],
                 "reply": reply,
                 "current_step": session.get("current_step"),
                 "state": session,
                 "quick_replies": quick_replies,
-                "booking": None
+                "booking": None,
+                "options": room_options
             }
 
         # ==============================================================
@@ -2450,13 +2459,21 @@ class BookingAgent:
                 "timestamp": datetime.utcnow().isoformat()
             })
             db_manager.save_session(session["session_id"], session)
+            room_options = None
+            if session.get("current_step") == STEP_ASK_ROOM_TYPE:
+                room_options = {
+                    "type": "rooms",
+                    "hotel_name": session.get("hotel_name"),
+                    "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+                }
             return {
                 "session_id": session["session_id"],
                 "reply": reply,
                 "current_step": session.get("current_step"),
                 "state": session,
                 "quick_replies": quick_replies,
-                "booking": None
+                "booking": None,
+                "options": room_options
             }
 
         # ==============================================================
@@ -2706,13 +2723,21 @@ class BookingAgent:
                 "timestamp": datetime.utcnow().isoformat()
             })
             db_manager.save_session(session["session_id"], session)
+            room_options = None
+            if session.get("current_step") == STEP_ASK_ROOM_TYPE:
+                room_options = {
+                    "type": "rooms",
+                    "hotel_name": session.get("hotel_name"),
+                    "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+                }
             return {
                 "session_id": session["session_id"],
                 "reply": reply,
                 "current_step": session.get("current_step"),
                 "state": session,
                 "quick_replies": quick_replies,
-                "booking": None
+                "booking": None,
+                "options": room_options
             }
 
         # ==============================================================
@@ -2729,13 +2754,21 @@ class BookingAgent:
                 "timestamp": datetime.utcnow().isoformat()
             })
             db_manager.save_session(session["session_id"], session)
+            room_options = None
+            if session.get("current_step") == STEP_ASK_ROOM_TYPE:
+                room_options = {
+                    "type": "rooms",
+                    "hotel_name": session.get("hotel_name"),
+                    "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+                }
             return {
                 "session_id": session["session_id"],
                 "reply": reply,
                 "current_step": session.get("current_step"),
                 "state": session,
                 "quick_replies": quick_replies,
-                "booking": None
+                "booking": None,
+                "options": room_options
             }
 
         # ==============================================================
@@ -2824,14 +2857,10 @@ class BookingAgent:
                     session["location_city"] = matched_loc["city"]
                     session["airport_code"] = matched_loc["airport_code"]
 
-                    hotels = db_manager.get_all_hotels(location_id=matched_loc["location_id"])
-                    hotel_list_text = [f"🏨 **{h['name']}**\n   • Location: {h['address']}\n   • Rating: {h['rating']}⭐\n   • {h['description']}" for h in hotels]
-                    hotels_display = "\n\n".join(hotel_list_text)
                     session["current_step"] = STEP_ASK_HOTEL
 
                     reply = (
-                        f"Wonderful! We have luxury properties connected to **{matched_loc['city']} ({matched_loc['airport_code']})** near {matched_loc['airport_name']}:\n\n"
-                        f"{hotels_display}\n\n"
+                        f"Wonderful! We have luxury properties connected to **{matched_loc['city']} ({matched_loc['airport_code']})** near {matched_loc['airport_name']}.\n\n"
                         f"**Which hotel would you prefer to stay at?**"
                     )
                     quick_replies = self.get_hotel_quick_replies(matched_loc["location_id"])
@@ -2855,17 +2884,10 @@ class BookingAgent:
                     session["location_city"] = matched_loc["city"]
                     session["airport_code"] = matched_loc["airport_code"]
 
-                    hotels = db_manager.get_all_hotels(location_id=matched_loc["location_id"])
-                    hotel_list_text = []
-                    for h in hotels:
-                        hotel_list_text.append(f"🏨 **{h['name']}**\n   • Location: {h['address']}\n   • Rating: {h['rating']}⭐\n   • {h['description']}")
-                    
-                    hotels_display = "\n\n".join(hotel_list_text)
                     session["current_step"] = STEP_ASK_HOTEL
 
                     reply = (
-                        f"Wonderful! We have luxury properties connected to **{matched_loc['city']} ({matched_loc['airport_code']})** near {matched_loc['airport_name']}:\n\n"
-                        f"{hotels_display}\n\n"
+                        f"Wonderful! We have luxury properties connected to **{matched_loc['city']} ({matched_loc['airport_code']})** near {matched_loc['airport_name']}.\n\n"
                         f"**Which hotel would you prefer to stay at?**"
                     )
                     quick_replies = self.get_hotel_quick_replies(matched_loc["location_id"])
@@ -2907,12 +2929,7 @@ class BookingAgent:
                     )
                 elif is_negative:
                     session.pop("pending_hotel_clarification", None)
-                    hotels = db_manager.get_all_hotels(location_id=session.get("location_id"))
-                    hotel_names = [f"• **{h['name']}**" for h in hotels]
-                    reply = (
-                        f"Please choose from our available hotels in {session.get('location_city', 'this destination')}:\n\n"
-                        + "\n".join(hotel_names) + "\n\nWhich hotel would you like to reserve?"
-                    )
+                    reply = f"Which hotel would you like to reserve in **{session.get('location_city', 'this destination')}**?"
                     quick_replies = self.get_hotel_quick_replies(session.get("location_id"))
                 else:
                     session.pop("pending_hotel_clarification", None)
@@ -2937,12 +2954,7 @@ class BookingAgent:
                     reply = f"Did you mean **{matched_hotel['name']}**? (Is that right?)"
                     quick_replies = [f"Yes, {matched_hotel['name']}", "No, choose another"]
                 else:
-                    hotels = db_manager.get_all_hotels(location_id=session.get("location_id"))
-                    hotel_names = [f"• **{h['name']}**" for h in hotels]
-                    reply = (
-                        f"Please choose from our available hotels in {session.get('location_city', 'this destination')}:\n\n"
-                        + "\n".join(hotel_names) + "\n\nWhich hotel would you like to reserve?"
-                    )
+                    reply = f"Which hotel would you like to reserve in **{session.get('location_city', 'this destination')}**?"
                     quick_replies = self.get_hotel_quick_replies(session.get("location_id"))
 
         # ==============================================================
@@ -3130,13 +3142,13 @@ class BookingAgent:
                 elif is_negative:
                     handled_clarification = True
                     session.pop("pending_room_clarification", None)
-                    room_list_str = self.format_room_options_text(hotel_id=session.get("hotel_id"))
-                    reply = (
-                        f"No problem! Please choose from our available room categories:\n\n"
-                        f"{room_list_str}\n\n"
-                        f"Which room type would you like to reserve?"
-                    )
+                    reply = f"No problem! Which room type would you prefer for your stay at **{session.get('hotel_name', 'our hotel')}**?"
                     quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
+                    options_data = {
+                        "type": "rooms",
+                        "hotel_name": session.get("hotel_name"),
+                        "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+                    }
                 else:
                     session.pop("pending_room_clarification", None)
 
@@ -3607,7 +3619,11 @@ class BookingAgent:
                     "items": db_manager.get_all_hotels(location_id=session.get("location_id"))
                 }
             elif current_step_now == STEP_ASK_ROOM_TYPE:
-                options_data = None
+                options_data = {
+                    "type": "rooms",
+                    "hotel_name": session.get("hotel_name"),
+                    "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
+                }
             elif current_step_now == STEP_ASK_AIRPORT_VEHICLE:
                 options_data = {
                     "type": "vehicles",

@@ -295,7 +295,6 @@ function renderInChatOptions(options) {
                   <span class="inchat-hotel-rating">⭐ ${h.rating || 4.8}</span>
                 </div>
                 <span class="inchat-hotel-address"><i class="fa-solid fa-location-dot"></i> ${escapeHtml(h.address)}</span>
-                <p class="inchat-hotel-desc">${escapeHtml(h.description || '')}</p>
                 <div class="inchat-hotel-footer">
                   <span class="inchat-btn-select">Select this hotel <i class="fa-solid fa-arrow-right"></i></span>
                 </div>
@@ -307,9 +306,37 @@ function renderInChatOptions(options) {
     `;
   }
 
-  // 3. Room Type Cards (extra details omitted - only clickable options rendered via quick replies)
-  if (options.type === "rooms") {
-    return "";
+  // 3. Room Type Cards
+  if (options.type === "rooms" && options.items) {
+    return `
+      <div class="in-chat-options-container">
+        <div class="options-title-bar">
+          <i class="fa-solid fa-bed"></i> Available Room Options${options.hotel_name ? ` at ${escapeHtml(options.hotel_name)}` : ''}:
+        </div>
+        <div class="rooms-cards-list">
+          ${options.items.map(r => `
+            <div class="inchat-room-card" onclick="handleQuickSelect('${escapeHtml(r.name)}')">
+              <div class="inchat-room-thumb-box">
+                <img src="${r.image_url || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=600&q=80'}" alt="${escapeHtml(r.name)}" class="inchat-room-thumb" loading="lazy">
+                ${r.badge ? `<span class="inchat-room-badge">${escapeHtml(r.badge)}</span>` : ''}
+              </div>
+              <div class="inchat-room-body">
+                <div class="inchat-room-title-row">
+                  <span class="inchat-room-name">${escapeHtml(r.name)}</span>
+                  <span class="inchat-room-price">$${Math.round(r.price_per_night || 0)}/nt</span>
+                </div>
+                <div class="inchat-room-meta">
+                  <span class="inchat-meta-pill"><i class="fa-solid fa-user-group"></i> Up to ${r.capacity_per_room || 2} guests</span>
+                </div>
+                <div class="inchat-hotel-footer" style="margin-top: 6px;">
+                  <span class="inchat-btn-select">Select this room <i class="fa-solid fa-arrow-right"></i></span>
+                </div>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
   }
 
   // Food & Dining Option Cards

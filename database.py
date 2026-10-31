@@ -34,14 +34,14 @@ class DatabaseManager:
     def _connect(self, force: bool = False):
         import time
         now = time.time()
-        if not force and now - self._last_connect_attempt < 15.0:
+        if not force and now - self._last_connect_attempt < 60.0:
             return
         self._last_connect_attempt = now
         try:
             self.client = MongoClient(
                 settings.MONGODB_URI,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000
+                serverSelectionTimeoutMS=2000,
+                connectTimeoutMS=2000
             )
             self.db = self.client[settings.MONGODB_DB_NAME]
             self.client.admin.command('ping')
