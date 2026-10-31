@@ -211,6 +211,81 @@ USA_HOTELS = [   {   'address': 'One Idlewild Drive, JFK Airport Terminal 5, Que
         'location_id': 'LOC-JFK',
         'name': 'The St. Regis New York',
         'rating': 4.7},
+{   'address': '35 East 76th Street at Madison Avenue, Upper East Side, New York, NY 10021',
+        'aliases': ['the carlyle', 'carlyle hotel', 'rosewood new york', 'bemelmans', 'madison ave hotel', 'carlyle'],
+        'amenities': [   'Bemelmans Bar',
+                         'Café Carlyle Jazz',
+                         'Valmont Spa',
+                         'Upper East Side Panorama',
+                         '24/7 Concierge',
+                         'Free High-Speed Wi-Fi'],
+        'badge': 'Upper East Side Legend',
+        'description': 'Historic 1930 Upper East Side landmark, home to legendary Bemelmans Bar, Café Carlyle jazz performances, and classic New York residential elegance.',
+        'hotel_id': 'HTL-JFK-006',
+        'image_url': 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=800&q=80',
+        'location_id': 'LOC-JFK',
+        'name': 'The Carlyle, A Rosewood Hotel',
+        'rating': 4.7},
+    {   'address': '375 Greenwich Street, Tribeca, New York, NY 10013',
+        'aliases': ['greenwich hotel', 'the greenwich', 'tribeca hotel', 'robert de niro hotel', 'locanda verde'],
+        'amenities': [   'Shibui Spa & Pool',
+                         'Locanda Verde Trattoria',
+                         'Private Bamboo Courtyard',
+                         'Handcrafted Tibetan Rugs',
+                         'Tribeca Cobblestone Proximity',
+                         'Free High-Speed Wi-Fi'],
+        'badge': 'Tribeca Boutique Sanctuary',
+        'description': 'Bespoke Tribeca sanctuary co-owned by Robert De Niro, featuring Shibui Spa with lantern-lit indoor pool, Locanda Verde trattoria, and private leafy courtyard.',
+        'hotel_id': 'HTL-JFK-007',
+        'image_url': 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80',
+        'location_id': 'LOC-JFK',
+        'name': 'The Greenwich Hotel',
+        'rating': 4.8},
+    {   'address': '28 West 53rd Street, Midtown Manhattan, New York, NY 10019',
+        'aliases': ['baccarat hotel', 'baccarat new york', '53rd street hotel', 'moma hotel', 'baccarat'],
+        'amenities': [   '15,000 Baccarat Crystals',
+                         'Spa de La Mer',
+                         '50-Foot Marble Pool',
+                         'Grand Salon Dining',
+                         'Opposite MoMA',
+                         'Free High-Speed Wi-Fi'],
+        'badge': 'French Crystal Glamour',
+        'description': 'Opulent Parisian-inspired Midtown gem opposite MoMA, adorned with 15,000 Baccarat crystal stemware pieces, Grand Salon dining, and Spa de La Mer.',
+        'hotel_id': 'HTL-JFK-008',
+        'image_url': 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
+        'location_id': 'LOC-JFK',
+        'name': 'Baccarat Hotel New York',
+        'rating': 4.7},
+    {   'address': '455 Madison Avenue at 50th Street, Midtown East, New York, NY 10022',
+        'aliases': ['lotte new york palace', 'new york palace', 'the palace hotel', 'villard mansion', 'madison palace'],
+        'amenities': [   'Villard Mansion Courtyard',
+                         'The Towers VIP Check-in',
+                         'St. Patrick Cathedral Views',
+                         'Spa by Lotte',
+                         'Madison Avenue Shopping',
+                         'Free High-Speed Wi-Fi'],
+        'badge': 'Historic Villard Mansion',
+        'description': 'Premier luxury landmark blending the historic 1882 Villard Mansion with a modern 55-story tower opposite St. Patrick Cathedral.',
+        'hotel_id': 'HTL-JFK-009',
+        'image_url': 'https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=800&q=80',
+        'location_id': 'LOC-JFK',
+        'name': 'Lotte New York Palace',
+        'rating': 4.6},
+    {   'address': '80 Columbus Circle at 60th Street, Manhattan, New York, NY 10023',
+        'aliases': ['mandarin oriental ny', 'mandarin oriental central park', 'columbus circle hotel', 'mandarin oriental'],
+        'amenities': [   'Central Park Panorama',
+                         '75-Foot Indoor Lap Pool',
+                         'Five-Star Oriental Spa',
+                         'MO Lounge Dining',
+                         'Columbus Circle Access',
+                         'Free High-Speed Wi-Fi'],
+        'badge': 'Columbus Circle & Central Park Views',
+        'description': 'Perched atop the Deutsche Bank Center at Columbus Circle, offering breathtaking 360-degree vistas of Central Park, the Hudson River, and the Manhattan skyline.',
+        'hotel_id': 'HTL-JFK-010',
+        'image_url': 'https://images.unsplash.com/photo-1584132967334-10e028bd69f7?auto=format&fit=crop&w=800&q=80',
+        'location_id': 'LOC-JFK',
+        'name': 'Mandarin Oriental, New York',
+        'rating': 4.7},
     {   'address': '6225 W Century Boulevard, Los Angeles, CA 90045 (Closest to LAX Terminal 1)',
         'aliases': ['hyatt regency lax', 'hyatt lax', 'century boulevard hotel', 'lax airport hotel'],
         'amenities': [   '24/7 Dedicated LAX Shuttle',
@@ -1265,3 +1340,587 @@ USA_ROOMS_TEMPLATE = [   {   'amenities': [   '1 Plush King Bed',
         'room_id': 'PRES-PNT',
         'total_rooms': 3}]
 
+
+# Authentic Real-World Room Configurations for Hotels
+HOTEL_SPECIFIC_ROOMS = {
+    # TWA Hotel at JFK Airport
+    "HTL-JFK-001": [
+        {
+            "room_id": "HTL-JFK-001-R1",
+            "name": "Deluxe King Room - Runway View",
+            "price_per_night": 269.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Ultra-quiet room featuring 4.5-inch acoustic soundproof windows overlooking active runways 4L/22R.",
+            "amenities": ["1 Plush King Bed", "4.5-Inch Soundproof Glass", "En-suite Bath", "Smart 4K TV", "Free High-Speed Wi-Fi"],
+            "badge": "Active Runway Views & Soundproof",
+            "total_rooms": 15,
+            "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-001-R2",
+            "name": "Superior Double Queen Room",
+            "price_per_night": 299.0,
+            "capacity_per_room": 4,
+            "category": "Superior",
+            "description": "Mid-century modern room with two plush queen beds, Saarinen design furnishings, and soundproof picture windows.",
+            "amenities": ["2 Plush Queen Beds", "1962 Saarinen Styling", "Martini Bar Setup", "Free High-Speed Wi-Fi"],
+            "badge": "2 Queen Beds & Vintage Styling",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-001-R3",
+            "name": "Executive King Suite",
+            "price_per_night": 429.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Spacious executive suite overlooking the iconic 1962 Saarinen terminal, with lounge seating and work desk.",
+            "amenities": ["1 California King Bed", "Separate Lounge Parlor", "Executive Desk", "Complimentary Breakfast Buffet"],
+            "badge": "Historic Terminal Views & Free Breakfast",
+            "total_rooms": 8,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-001-R4",
+            "name": "Howard Hughes Presidential Suite",
+            "price_per_night": 750.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "Top-floor aviation suite with direct panoramic airfield vistas, custom wet bar, and VIP runway access passes.",
+            "amenities": ["1 Grand King Bed", "Airfield Panorama", "Private Wet Bar", "All-Inclusive VIP Dining", "24/7 Butler"],
+            "badge": "VIP Airfield Penthouse",
+            "total_rooms": 3,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # The Plaza New York
+    "HTL-JFK-002": [
+        {
+            "room_id": "HTL-JFK-002-R1",
+            "name": "Plaza King Room",
+            "price_per_night": 795.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Timeless 475 sq ft French Renaissance room with crystal chandeliers and bathroom adorned in 24-karat gold-plated fixtures.",
+            "amenities": ["1 Plush King Bed", "24K Gold-Plated Fixtures", "Guerlain Bath Amenities", "Smart iPad Room Control"],
+            "badge": "Iconic Gilded Luxury",
+            "total_rooms": 14,
+            "image_url": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-002-R2",
+            "name": "Deluxe Two Queen Room",
+            "price_per_night": 895.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Elegantly appointed 550 sq ft room featuring two plush queen beds, sitting area, and white-glove service.",
+            "amenities": ["2 Plush Queen Beds", "Spacious Sitting Area", "Italian Marble Bath", "Fifth Avenue Proximity"],
+            "badge": "2 Queen Beds & French Château Elegance",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-002-R3",
+            "name": "Edwardian Park View Suite",
+            "price_per_night": 1650.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Grand 1,000 sq ft suite with separate living room, mosaic-tiled bathroom, 24/7 St. Regis/Plaza Butler, and Central Park views.",
+            "amenities": ["1 California King Bed", "Central Park Views", "Private Butler Service", "Complimentary Gourmet Breakfast"],
+            "badge": "Central Park Views & Butler Service",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-002-R4",
+            "name": "Royal Plaza 3-Bedroom Suite",
+            "price_per_night": 3500.0,
+            "capacity_per_room": 6,
+            "category": "Presidential",
+            "description": "Palatial 4,500 sq ft residence overlooking Central Park South and Fifth Avenue, featuring formal dining room, grand piano, and private elevator.",
+            "amenities": ["3 Bedrooms (1 Grand King + 2 Queen Beds)", "Private Balcony / Terrace", "Grand Piano", "All-Inclusive VIP Butler"],
+            "badge": "Palatial 3-Bedroom Penthouse",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # The Ritz-Carlton New York, Central Park
+    "HTL-JFK-003": [
+        {
+            "room_id": "HTL-JFK-003-R1",
+            "name": "Superior King Room",
+            "price_per_night": 850.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Refined residential room with bespoke furnishings, Italian marble bathroom, and La Prairie bath amenities.",
+            "amenities": ["1 Plush King Bed", "La Prairie Amenities", "Marble Rain Shower", "Audemars Piguet In-Room Safe"],
+            "badge": "Forbes Five-Star Residential",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-003-R2",
+            "name": "Deluxe Double Queen Room",
+            "price_per_night": 920.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Sophisticated accommodation featuring two queen beds, custom Frette linens, and Midtown Manhattan views.",
+            "amenities": ["2 Plush Queen Beds", "Frette Linens", "Carrara Marble Bath", "Complimentary Evening Turndown"],
+            "badge": "2 Queen Beds & Forbes Luxury",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-003-R3",
+            "name": "Central Park View King Suite",
+            "price_per_night": 1650.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Breathtaking suite framing unobstructed views of Central Park, with Ritz-Carlton Club Lounge access (5 daily culinary presentations).",
+            "amenities": ["1 California King Bed", "Central Park Panorama", "Club Lounge Access (5 Daily Meals)", "Chauffeur House Car"],
+            "badge": "Club Lounge & Central Park Panorama",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-003-R4",
+            "name": "The Ritz-Carlton Grand Suite",
+            "price_per_night": 3200.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "Premier corner suite with panoramic park vistas, private dining room, telescope for park viewing, and VIP concierge.",
+            "amenities": ["1 Grand King Bed", "Corner Park Views", "Private Dining Salon", "All-Inclusive VIP Dining", "Dedicated Concierge"],
+            "badge": "Ultra-Luxury Park Penthouse",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # 1 Hotel Brooklyn Bridge
+    "HTL-JFK-004": [
+        {
+            "room_id": "HTL-JFK-004-R1",
+            "name": "DUMBO King Room",
+            "price_per_night": 450.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Sustainable luxury room built with native greenery, reclaimed pine, filtered water taps, and industrial chic floor-to-ceiling glass.",
+            "amenities": ["1 Plush King Bed", "Organic Cotton Mattresses", "Filtered Water Tap", "Bamford Spa Products"],
+            "badge": "Waterfront Eco-Luxury",
+            "total_rooms": 14,
+            "image_url": "https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-004-R2",
+            "name": "Skyline Two Queen Room",
+            "price_per_night": 620.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Dramatic vistas of Lower Manhattan skyline and East River with two plush organic queen beds and industrial lounge seating.",
+            "amenities": ["2 Plush Queen Beds", "Manhattan Skyline Views", "Custom Reclaimed Wood Furniture", "Rainforest Shower"],
+            "badge": "2 Queen Beds & Skyline Views",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-004-R3",
+            "name": "Bridge King Suite",
+            "price_per_night": 850.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Front-row suite looking directly onto Brooklyn Bridge and Lady Liberty, featuring living room with hammock and custom wet bar.",
+            "amenities": ["1 King Bed", "Direct Brooklyn Bridge Views", "In-Room Hammock", "Complimentary Gourmet Breakfast"],
+            "badge": "Brooklyn Bridge Views & Free Breakfast",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-004-R4",
+            "name": "Riverhouse Penthouse Suite",
+            "price_per_night": 2400.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "Rooftop penthouse with expansive private landscaped terrace overlooking the Manhattan skyline, soaking tub, and fireplace.",
+            "amenities": ["1 Grand King Bed", "Private Terrace Balcony", "Manhattan Skyline Views", "All-Inclusive VIP Dining", "Fireplace"],
+            "badge": "Private Terrace & Skyline Panorama",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # The St. Regis New York
+    "HTL-JFK-005": [
+        {
+            "room_id": "HTL-JFK-005-R1",
+            "name": "Superior King Room",
+            "price_per_night": 895.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Historic Fifth Avenue elegance with signature 24/7 St. Regis Butler service, Italian marble bath, and silk wall coverings.",
+            "amenities": ["1 Plush King Bed", "24/7 St. Regis Butler Service", "Packing & Unpacking Service", "Beverage Delivery"],
+            "badge": "24/7 White-Glove Butler Service",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-005-R2",
+            "name": "Deluxe Two Queen Room",
+            "price_per_night": 985.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Lavish 550 sq ft room featuring two queen beds, Waterford crystal chandeliers, and deep soaking marble tub.",
+            "amenities": ["2 Plush Queen Beds", "Waterford Chandeliers", "Soaking Tub & Rain Shower", "24/7 Butler Service"],
+            "badge": "2 Queen Beds & Astor Luxury",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-005-R3",
+            "name": "Astor King Suite",
+            "price_per_night": 1450.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Quintessential New York suite with separate salon parlor, French doors, complimentary morning French press coffee, and afternoon tea.",
+            "amenities": ["1 California King Bed", "Separate Drawing Room", "Complimentary Gourmet Breakfast", "24/7 Butler"],
+            "badge": "Astor Suite & Free Breakfast",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-005-R4",
+            "name": "Fifth Avenue Presidential Suite",
+            "price_per_night": 3800.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "Magnificent 3,400 sq ft suite overlooking Fifth Avenue and 55th Street, featuring formal dining room, library, and grand piano.",
+            "amenities": ["1 Grand King Bed", "Private Terrace Balcony", "Grand Piano & Library", "All-Inclusive VIP Dining", "Bentley House Car"],
+            "badge": "Fifth Avenue Landmark Penthouse",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # The Carlyle, A Rosewood Hotel
+    "HTL-JFK-006": [
+        {
+            "room_id": "HTL-JFK-006-R1",
+            "name": "Superior King Room",
+            "price_per_night": 875.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Classic Upper East Side residential styling with bespoke Dorothy Draper prints, Frette linens, and marble bath.",
+            "amenities": ["1 Plush King Bed", "Frette Linens", "Marble Rain Shower", "Kiehl's Toiletries"],
+            "badge": "Classic Upper East Side Elegance",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-006-R2",
+            "name": "Deluxe Two Queen Room",
+            "price_per_night": 965.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Quiet Upper East Side courtyard view with two plush queen beds, sitting salon, and artisan mini-bar.",
+            "amenities": ["2 Plush Queen Beds", "Quiet Courtyard Views", "Spacious Marble Bath", "Nespresso Machine"],
+            "badge": "2 Queen Beds & Carlyle Comfort",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-006-R3",
+            "name": "Premier Carlyle Suite",
+            "price_per_night": 1450.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Signature one-bedroom suite featuring distinct living salon, original artwork, and priority Bemelmans Bar reservations.",
+            "amenities": ["1 California King Bed", "Separate Living Salon", "Complimentary Gourmet Breakfast", "Bemelmans Bar Priority"],
+            "badge": "Carlyle Suite & Free Breakfast",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-006-R4",
+            "name": "Central Park Tower Suite",
+            "price_per_night": 2100.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "High-floor tower residence framing breathtaking 360-degree Central Park vistas, with private wet bar and butler.",
+            "amenities": ["1 Grand King Bed", "Central Park Panorama", "All-Inclusive VIP Dining", "Dedicated Butler"],
+            "badge": "Tower Residence & Park Views",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # The Greenwich Hotel
+    "HTL-JFK-007": [
+        {
+            "room_id": "HTL-JFK-007-R1",
+            "name": "Courtyard King Room",
+            "price_per_night": 825.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Handcrafted Tribeca haven with Tibetan silk rugs, Moroccan tiling, Carrara marble bath, and leafy courtyard views.",
+            "amenities": ["1 Plush King Bed", "Handcrafted Tibetan Rugs", "Carrara Marble Soak Tub", "Free High-Speed Wi-Fi"],
+            "badge": "Tribeca Craftsmanship & Courtyard",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-007-R2",
+            "name": "Greenwich Two Queen Room",
+            "price_per_night": 950.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Spacious room overlooking Greenwich Street cobblestones, featuring two queen beds, Duxiana mattresses, and reclaimed oak.",
+            "amenities": ["2 Plush Queen Beds", "Duxiana Mattresses", "Reclaimed Oak Paneling", "Snack Basket Included"],
+            "badge": "2 Queen Beds & Cobblestone Views",
+            "total_rooms": 8,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-007-R3",
+            "name": "Studio King Suite",
+            "price_per_night": 1250.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Bespoke studio suite with working wood-burning fireplace, deep soaking tub, and Shibui Spa pool access.",
+            "amenities": ["1 California King Bed", "Working Wood Fireplace", "Complimentary Gourmet Breakfast", "Shibui Spa Access"],
+            "badge": "Fireplace Suite & Free Breakfast",
+            "total_rooms": 5,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-007-R4",
+            "name": "Corner Penthouse Suite",
+            "price_per_night": 2800.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "Architectural masterpiece designed by Axel Vervoordt and Tatsuro Miki with private wabi-sabi bamboo terrace, sauna, and soaking pool.",
+            "amenities": ["1 Grand King Bed", "Private Bamboo Terrace", "Private Sauna & Soaking Pool", "All-Inclusive VIP Dining"],
+            "badge": "Axel Vervoordt Wabi-Sabi Penthouse",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # Baccarat Hotel New York
+    "HTL-JFK-008": [
+        {
+            "room_id": "HTL-JFK-008-R1",
+            "name": "Classic King Room",
+            "price_per_night": 950.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Opulent Parisian styling with custom Baccarat crystal stemware, four-poster bed draped in woven jacquard, and marble bath.",
+            "amenities": ["1 Plush King Bed", "Custom Baccarat Crystal", "Spa de La Mer Amenities", "Marble Bathroom with Concealed TV"],
+            "badge": "French Crystal & Four-Poster King",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-008-R2",
+            "name": "Grand Classic Two Queen",
+            "price_per_night": 1050.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Floor-to-ceiling windows overlooking Midtown Manhattan, two plush queen beds, and crystal sconces.",
+            "amenities": ["2 Plush Queen Beds", "Midtown Skyline Views", "Custom Red Lacquer Mini-Bar", "Free High-Speed Wi-Fi"],
+            "badge": "2 Queen Beds & French Crystal",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-008-R3",
+            "name": "Prestige King Suite",
+            "price_per_night": 1650.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Lavish one-bedroom suite with distinct Baccarat crystal salon, walk-in dressing room, and Grand Salon breakfast.",
+            "amenities": ["1 California King Bed", "Separate Crystal Salon", "Complimentary Gourmet Breakfast", "Spa de La Mer Access"],
+            "badge": "Prestige Suite & Free Breakfast",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-008-R4",
+            "name": "Baccarat Presidential Suite",
+            "price_per_night": 3500.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "The pinnacle of French luxury opposite MoMA, with dining salon for 8, dedicated champagne butler, and private chauffeur.",
+            "amenities": ["1 Grand King Bed", "Opposite MoMA Views", "Dining Salon for 8", "All-Inclusive VIP Dining", "24/7 Butler"],
+            "badge": "French Palace Penthouse",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # Lotte New York Palace
+    "HTL-JFK-009": [
+        {
+            "room_id": "HTL-JFK-009-R1",
+            "name": "Palace King Room",
+            "price_per_night": 595.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Refined Manhattan retreat with plush king bed, marble vanity bath, and views of Madison Avenue or courtyard.",
+            "amenities": ["1 Plush King Bed", "Marble Vanity Bath", "Madison Avenue Proximity", "Smart 4K TV"],
+            "badge": "Classic Madison Avenue Palace",
+            "total_rooms": 15,
+            "image_url": "https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-009-R2",
+            "name": "Palace Two Queen Room",
+            "price_per_night": 685.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Dramatic vistas framing St. Patrick Cathedral, with two plush queen beds, deep soaking tub, and luxury robes.",
+            "amenities": ["2 Plush Queen Beds", "St. Patrick Cathedral Views", "Deep Soaking Tub", "High-Speed Wi-Fi"],
+            "badge": "2 Queen Beds & Cathedral Views",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-009-R3",
+            "name": "Towers Corner Suite",
+            "price_per_night": 1250.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Exclusive high-floor Towers enclave with private check-in, separate living parlor, and complimentary lounge breakfast.",
+            "amenities": ["1 California King Bed", "Private Towers VIP Check-in", "Complimentary Gourmet Breakfast", "Skyline Views"],
+            "badge": "Towers VIP & Free Breakfast",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-009-R4",
+            "name": "Villard Historic Mansion Suite",
+            "price_per_night": 2800.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "Historic Gilded Age suite within the 1882 McKim, Mead & White Villard Mansion with 14-foot carved ceilings and wood fireplace.",
+            "amenities": ["1 Grand King Bed", "1882 Historic Mansion", "14-Foot Carved Ceilings", "All-Inclusive VIP Dining", "Butler"],
+            "badge": "1882 Historic Gilded Age Landmark",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ],
+
+    # Mandarin Oriental, New York
+    "HTL-JFK-010": [
+        {
+            "room_id": "HTL-JFK-010-R1",
+            "name": "Hudson River King Room",
+            "price_per_night": 795.0,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": "Perched above Columbus Circle with floor-to-ceiling glass framing stunning Hudson River sunset panoramas.",
+            "amenities": ["1 Plush King Bed", "Hudson River Panoramas", "Deep Soaking Marble Tub", "Bespoke Asian Silk Art"],
+            "badge": "Hudson River Sunset Views",
+            "total_rooms": 14,
+            "image_url": "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-010-R2",
+            "name": "Central Park Two Double Room",
+            "price_per_night": 895.0,
+            "capacity_per_room": 4,
+            "category": "Deluxe",
+            "description": "Sweeping bird-eye vistas over Central Park with two double beds, Asian-inspired woodwork, and 75-foot pool access.",
+            "amenities": ["2 Plush Double Beds", "Central Park Panorama", "75-Foot Pool Access", "Five-Star Spa Access"],
+            "badge": "Central Park Skyline & 2 Beds",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-010-R3",
+            "name": "Central Park King Suite",
+            "price_per_night": 1750.0,
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": "Dual-aspect corner suite looking out across the entire expanse of Central Park and the Manhattan skyline.",
+            "amenities": ["1 California King Bed", "Corner Central Park Panorama", "Complimentary Gourmet Breakfast", "Spa Access"],
+            "badge": "Corner Park Suite & Free Breakfast",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": "HTL-JFK-010-R4",
+            "name": "Oriental Penthouse Suite",
+            "price_per_night": 3800.0,
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": "54th-floor penthouse with 360-degree skyline views, private elevator foyer, MO Lounge VIP privileges, and butler.",
+            "amenities": ["1 Grand King Bed", "54th-Floor 360 Views", "Private Elevator Foyer", "All-Inclusive VIP Dining", "Butler"],
+            "badge": "54th-Floor 360 Penthouse",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=800&q=80"
+        }
+    ]
+}
+
+def get_rooms_for_hotel(hotel):
+    """Return authentic real-world room configurations for any hotel."""
+    h_id = hotel.get("hotel_id", "")
+    if h_id in HOTEL_SPECIFIC_ROOMS:
+        return HOTEL_SPECIFIC_ROOMS[h_id]
+
+    h_name = hotel.get("name", "Luxury Hotel")
+    rate = hotel.get("rating", 4.5)
+    base_rate = 260.0 if rate < 4.5 else (380.0 if rate < 4.7 else 550.0)
+
+    return [
+        {
+            "room_id": f"{h_id}-R1",
+            "name": "Superior King Room",
+            "price_per_night": base_rate,
+            "capacity_per_room": 2,
+            "category": "Deluxe",
+            "description": f"Plush king-bedded room with custom furnishings, marble bath, and high-speed Wi-Fi at {h_name}.",
+            "amenities": ["1 Plush King Bed", "En-suite Marble Bathroom", "Free High-Speed Wi-Fi", "Smart 4K TV", "Nespresso Machine"],
+            "badge": "Popular for Couples & Business",
+            "total_rooms": 12,
+            "image_url": "https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": f"{h_id}-R2",
+            "name": "Deluxe Two Queen Room",
+            "price_per_night": round(base_rate * 1.2, 0),
+            "capacity_per_room": 4,
+            "category": "Executive",
+            "description": f"Spacious room featuring two plush queen beds, seating area, and luxury amenities at {h_name}.",
+            "amenities": ["2 Plush Queen Beds", "Spacious Marble Bathroom", "Free High-Speed Wi-Fi", "Smart 4K TV", "Mini Refrigerator"],
+            "badge": "Best for Families & Colleagues",
+            "total_rooms": 10,
+            "image_url": "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": f"{h_id}-R3",
+            "name": "Executive Luxury Suite",
+            "price_per_night": round(base_rate * 1.8, 0),
+            "capacity_per_room": 3,
+            "category": "Suite",
+            "description": f"Expansive suite featuring separate living parlor, ergonomic workspace, and skyline views at {h_name}.",
+            "amenities": ["1 California King Bed", "Separate Living Room & Sofa", "Complimentary Gourmet Breakfast", "Executive Lounge Access"],
+            "badge": "Complimentary Breakfast Included",
+            "total_rooms": 6,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        },
+        {
+            "room_id": f"{h_id}-R4",
+            "name": "Presidential Penthouse Suite",
+            "price_per_night": round(base_rate * 3.5, 0),
+            "capacity_per_room": 4,
+            "category": "Presidential",
+            "description": f"Top-floor VIP residence with panoramic city views, master bedroom, and bespoke concierge at {h_name}.",
+            "amenities": ["1 Grand King Bed", "Panoramic Floor-to-Ceiling Windows", "Deep Soaking Jacuzzi Tub", "24/7 Dedicated Butler Service"],
+            "badge": "Top-Floor VIP Luxury",
+            "total_rooms": 2,
+            "image_url": "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80"
+        }
+    ]

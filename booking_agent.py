@@ -519,6 +519,20 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
         ("dumbo", "HTL-JFK-004"),
         ("st regis", "HTL-JFK-005"),
         ("king cole", "HTL-JFK-005"),
+        ("the carlyle", "HTL-JFK-006"),
+        ("carlyle", "HTL-JFK-006"),
+        ("bemelmans", "HTL-JFK-006"),
+        ("the greenwich hotel", "HTL-JFK-007"),
+        ("greenwich hotel", "HTL-JFK-007"),
+        ("tribeca", "HTL-JFK-007"),
+        ("robert de niro", "HTL-JFK-007"),
+        ("baccarat hotel", "HTL-JFK-008"),
+        ("baccarat", "HTL-JFK-008"),
+        ("lotte new york palace", "HTL-JFK-009"),
+        ("new york palace", "HTL-JFK-009"),
+        ("villard mansion", "HTL-JFK-009"),
+        ("mandarin oriental", "HTL-JFK-010"),
+        ("columbus circle", "HTL-JFK-010"),
         # Los Angeles (LAX)
         ("hyatt lax", "HTL-LAX-001"),
         ("beverly hills hotel", "HTL-LAX-002"),
@@ -746,6 +760,30 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
     # Guard against guest-type phrases (e.g. "Company / Corporate Booking", "individual guest")
     if any(k in t for k in ["corporate booking", "company booking", "corporate travel", "corporate guest", "individual guest", "individual booking", "company / corporate"]):
         return (None, "none", 0.0)
+
+    # 1. Direct match on the actual rooms of this hotel
+    for r in rooms:
+        r_name = r.get("name", "").lower()
+        r_name_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', r_name).strip()
+        if t == r_name or t_no_punct == r_name_clean or t == r.get("room_id", "").lower():
+            return (r, "exact", 1.0)
+        # Substring match if input is meaningful
+        if len(t) >= 4 and (t in r_name or r_name in t):
+            tokens = [w for w in t.split() if len(w) >= 3 and w not in ["room", "suite", "the", "hotel", "book", "please"]]
+            if any(tok in r_name for tok in tokens):
+                return (r, "exact", 1.0)
+
+    # 2. Check numeric ordinal ("1", "2", "option 1", "room 2") against the hotel's rooms
+    has_count_context = bool(re.search(r'\b(?:guests?|members?|people|rooms?|nights?|days?|pax)\b', t))
+    if not has_count_context:
+        ordinal_words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
+        for idx, r in enumerate(rooms):
+            if t in [f"option {idx+1}", f"room {idx+1}"]:
+                return (r, "exact", 1.0)
+            if allow_bare_ordinals:
+                ord_word = ordinal_words[idx] if idx < len(ordinal_words) else ""
+                if t == str(idx + 1) or (ord_word and t == ord_word):
+                    return (r, "exact", 1.0)
 
     if allow_bare_ordinals and t in ['corporate', 'business', 'corp']:
         return (get_room_doc('CORP-STE'), "clarify", 1.0)
@@ -1182,6 +1220,40 @@ class BookingAgent:
         # If user asked for general details/reviews OR asked multiple aspects (>= 2)
         is_comprehensive = details_asked or (sum([bed_asked, balcony_asked, smoking_asked, food_comp_asked]) >= 2)
 
+        # Get actual rooms for the hotel
+        hotel_rooms = db_manager.get_all_rooms(hotel_id=hotel.get("hotel_id"))
+        if not hotel_rooms:
+            hotel_rooms = DEFAULT_ROOMS_TEMPLATE
+
+        # Helper to extract bed from room doc
+        def get_room_bed(r):
+            for a in r.get("amenities", []):
+                if re.search(r'\b(bed|beds|king|queen|double|twin)\b', a, re.I):
+                    return a
+            name_low = r.get("name", "").lower()
+            if "king" in name_low:
+                return "1 Plush King Bed"
+            elif "queen" in name_low or "double" in name_low:
+                return "2 Plush Queen Beds"
+            return "1 Plush King or 2 Queen Beds"
+
+        # Helper to extract balcony from room doc
+        def get_room_balcony(r):
+            if any("balcony" in a.lower() or "terrace" in a.lower() for a in r.get("amenities", [])) or "penthouse" in r.get("name", "").lower():
+                return "✅ Private furnished balcony / terrace with scenic views"
+            return "❌ Acoustically insulated panoramic picture windows (no walk-out balcony)"
+
+        # Helper to extract dining from room doc
+        def get_room_dining(r):
+            if any("breakfast" in a.lower() for a in r.get("amenities", [])) or "suite" in r.get("name", "").lower() or "penthouse" in r.get("name", "").lower() or "club" in r.get("name", "").lower():
+                return "✅ Complimentary daily gourmet breakfast included"
+            return "Room-only base rate (Gourmet breakfast available on-site for purchase)"
+
+        # Build dynamic room lists
+        bed_desc = "\n".join([f"• **{r.get('name', 'Room')}**: {get_room_bed(r)}" for r in hotel_rooms])
+        balcony_desc = "\n".join([f"• **{r.get('name', 'Room')}**: {get_room_balcony(r)}" for r in hotel_rooms])
+        dining_desc = "\n".join([f"• **{r.get('name', 'Room')}**: {get_room_dining(r)}" for r in hotel_rooms])
+
         if is_comprehensive:
             source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
             sections.append(
@@ -1193,23 +1265,15 @@ class BookingAgent:
 
             # Bed details
             sections.append(
-                "🛏️ **Bed Types & Configurations**:\n"
-                "• **Deluxe Single Room**: 1 Plush King Bed (or King Single with plush pillowtop mattress)\n"
-                "• **Executive Double Room**: 1 King Bed or 2 Queen Beds upon advance request\n"
-                "• **Corporate Business Suite**: 1 California King Bed + 1 Executive Queen Sofa Daybed (2 beds)\n"
-                "• **Luxury Family & Team Villa**: 3 Beds (1 California King Master Bed + 2 Queen Beds in 2nd Bedroom)\n"
-                "• **Presidential Penthouse Suite**: 3 Beds (1 Grand California King Bed + 2 Plush Queen Beds in Guest Suite)"
+                f"🛏️ **Bed Types & Configurations**:\n"
+                f"{bed_desc}"
             )
 
             # Balcony details
-            balcony_custom = f"\n• *Property Note*: {web_info['balcony_note']}" if web_info.get("balcony_note") else ""
+            balcony_custom = f"\n• *Live Property Note*: {web_info['balcony_note']}" if web_info.get("balcony_note") else ""
             sections.append(
-                "🌅 **Balcony & Terrace Specifications**:\n"
-                "• **Deluxe Single Room**: ❌ No walk-out balcony (Acoustically insulated soundproof panoramic picture windows)\n"
-                "• **Executive Double Room**: ✅ Private furnished walk-out balcony with city skyline / garden views\n"
-                "• **Corporate Business Suite**: ✅ Private executive balcony with skyline panorama and ergonomic outdoor seating\n"
-                "• **Luxury Family & Team Villa**: ✅ Expansive landscaped terrace balcony with outdoor lounge seating\n"
-                "• **Presidential Penthouse Suite**: ✅ Wrap-around 360-degree private penthouse terrace with outdoor heated hydrotherapy jacuzzi"
+                f"🌅 **Balcony & Terrace Specifications**:\n"
+                f"{balcony_desc}"
                 f"{balcony_custom}"
             )
 
@@ -1223,58 +1287,35 @@ class BookingAgent:
             # Food / Complimentary Dining
             special_dining = f"\n• *Signature Dining*: {web_info['special_dining']}" if web_info.get("special_dining") else ""
             sections.append(
-                "🍳 **Food & Complimentary Dining**:\n"
-                "• **Deluxe Single & Executive Double**: Room-Only rate. Gourmet farm-to-table breakfast buffet available at on-site restaurants or in-room dining for an additional charge.\n"
-                "• **Corporate Business Suite**: ✅ Complimentary Executive Club Breakfast Buffet included daily (6:30 AM - 10:30 AM) with evening cocktail reception & hors d'oeuvres.\n"
-                "• **Luxury Family & Team Villa**: ✅ Complimentary Gourmet Family Breakfast Buffet included daily for all registered guests.\n"
-                "• **Presidential Penthouse Suite**: ✅ All-Inclusive VIP Dining with full gourmet American breakfast served in-suite by private butler."
+                f"🍳 **Food & Complimentary Dining**:\n"
+                f"{dining_desc}"
                 f"{special_dining}"
             )
         else:
             # Single aspect inquiry
+            cand_r = next((r for r in hotel_rooms if room_name and room_name.lower() in r.get("name", "").lower()), None)
+
             if bed_asked:
-                if room_name and "single" in room_name.lower():
-                    bed_desc = "• **1 Plush King Bed** (or King Single with plush pillowtop mattress)"
-                elif room_name and "double" in room_name.lower():
-                    bed_desc = "• **1 Plush King Bed** (or 2 Queen Beds upon advance request)"
-                elif room_name and "corporate" in room_name.lower():
-                    bed_desc = "• **1 California King Bed + 1 Executive Queen Sofa Daybed** (2 beds)"
-                elif room_name and "family" in room_name.lower():
-                    bed_desc = "• **3 Beds**: 1 California King Master Bed + 2 Queen Beds in 2nd Bedroom"
-                elif room_name and "penthouse" in room_name.lower():
-                    bed_desc = "• **3 Beds**: 1 Grand California King Bed + 2 Plush Queen Beds in Guest Suite"
+                if cand_r:
+                    b_text = f"• **{cand_r.get('name')}**: {get_room_bed(cand_r)}"
                 else:
-                    bed_desc = (
-                        "• **Deluxe Single Room**: 1 Plush King Bed (or King Single)\n"
-                        "• **Executive Double Room**: 1 King Bed or 2 Queen Beds upon request\n"
-                        "• **Corporate Business Suite**: 1 California King Bed + 1 Queen Sofa Daybed (2 beds)\n"
-                        "• **Luxury Family & Team Villa**: 3 Beds (1 King + 2 Queen Beds)\n"
-                        "• **Presidential Penthouse Suite**: 3 Beds (1 Grand California King + 2 Queen Beds)"
-                    )
+                    b_text = bed_desc
                 prefix_room = f" for **{room_name}**" if room_name else ""
                 sections.append(
                     f"🛏️ **Bed Configurations{prefix_room} at {h_name} (from Web Search & Hotel Records)**:\n\n"
-                    f"{bed_desc}"
+                    f"{b_text}"
                 )
 
             if balcony_asked:
-                if room_name and "single" in room_name.lower():
-                    balcony_desc = "❌ **No walk-out balcony** (Features acoustically insulated soundproof panoramic picture windows)."
-                elif room_name:
-                    balcony_desc = f"✅ **Yes, Private Balcony / Terrace** (Features furnished walk-out seating with panoramic views)."
+                if cand_r:
+                    balc_text = f"• **{cand_r.get('name')}**: {get_room_balcony(cand_r)}"
                 else:
-                    balcony_desc = (
-                        "• **Deluxe Single Room**: ❌ No walk-out balcony (Features soundproof panoramic picture windows)\n"
-                        "• **Executive Double Room**: ✅ Private furnished walk-out balcony with city views\n"
-                        "• **Corporate Business Suite**: ✅ Private executive balcony with skyline panorama\n"
-                        "• **Luxury Family & Team Villa**: ✅ Expansive landscaped terrace balcony with outdoor seating\n"
-                        "• **Presidential Penthouse Suite**: ✅ Wrap-around 360-degree private penthouse terrace with outdoor heated jacuzzi"
-                    )
+                    balc_text = balcony_desc
                 balcony_note = f"\n\n*Property Note*: {web_info['balcony_note']}" if web_info.get("balcony_note") else ""
                 prefix_room = f" for **{room_name}**" if room_name else ""
                 sections.append(
                     f"🌅 **Balcony Details{prefix_room} at {h_name} (from Web Search & Hotel Records)**:\n\n"
-                    f"{balcony_desc}{balcony_note}"
+                    f"{balc_text}{balcony_note}"
                 )
 
             if smoking_asked:
@@ -1286,28 +1327,15 @@ class BookingAgent:
                 )
 
             if food_comp_asked:
-                if room_name and ("corporate" in room_name.lower() or "family" in room_name.lower() or "penthouse" in room_name.lower()):
-                    dining_desc = (
-                        f"✅ **Yes, Complimentary Breakfast is Included** for **{room_name}**!\n"
-                        "• Includes full daily breakfast buffet (6:30 AM - 10:30 AM) with chef-crafted selections and evening hospitality reception."
-                    )
-                elif room_name:
-                    dining_desc = (
-                        f"❌ **Room-Only Rate** for **{room_name}**.\n"
-                        "• Complimentary breakfast is not included in base rate. Farm-to-table breakfast buffet is available at the signature restaurant or in-room dining for an additional charge."
-                    )
+                if cand_r:
+                    din_text = f"• **{cand_r.get('name')}**: {get_room_dining(cand_r)}"
                 else:
-                    dining_desc = (
-                        "• **Deluxe Single & Executive Double**: Room-Only rate (Breakfast available at on-site restaurant or in-room dining for an additional charge).\n"
-                        "• **Corporate Business Suite**: ✅ Complimentary Executive Club Breakfast Buffet included daily (6:30 AM - 10:30 AM).\n"
-                        "• **Luxury Family & Team Villa**: ✅ Complimentary Gourmet Family Breakfast Buffet included daily for all registered guests.\n"
-                        "• **Presidential Penthouse Suite**: ✅ All-Inclusive VIP Dining with gourmet American breakfast served in-suite by private butler."
-                    )
+                    din_text = dining_desc
                 special_dining = f"\n\n*Signature Dining*: {web_info['special_dining']}" if web_info.get("special_dining") else ""
                 source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
                 sections.append(
                     f"🍳 **Complimentary Food & Breakfast Details at {h_name}**{source_lbl}:\n\n"
-                    f"{dining_desc}{special_dining}"
+                    f"{din_text}{special_dining}"
                 )
 
             if details_asked and not is_comprehensive:
@@ -1321,39 +1349,13 @@ class BookingAgent:
                 )
 
             if rooms_asked:
-                hotel_rooms = db_manager.get_all_rooms(hotel_id=hotel.get("hotel_id"))
-                if not hotel_rooms:
-                    hotel_rooms = DEFAULT_ROOMS_TEMPLATE
-
                 room_lines = []
                 for r in hotel_rooms:
                     r_name = r.get("name", "Standard Room")
-                    price = r.get("price_per_night", 150.0)
-
-                    if "single" in r_name.lower():
-                        bed_str = "1 Plush King Bed"
-                        balcony_str = "Soundproof panoramic picture windows (no walk-out balcony)"
-                        dining_str = "Room-Only rate (Breakfast buffet available on-site)"
-                    elif "double" in r_name.lower():
-                        bed_str = "1 King Bed or 2 Queen Beds upon request"
-                        balcony_str = "Private furnished walk-out balcony with city views"
-                        dining_str = "Room-Only rate (Breakfast buffet available on-site)"
-                    elif "corporate" in r_name.lower():
-                        bed_str = "1 California King Bed + 1 Executive Queen Sofa Daybed"
-                        balcony_str = "Private executive balcony with skyline panorama"
-                        dining_str = "✅ Complimentary Executive Club Breakfast Buffet included daily"
-                    elif "family" in r_name.lower():
-                        bed_str = "3 Beds (1 California King Master Bed + 2 Queen Beds in 2nd Bedroom)"
-                        balcony_str = "Expansive landscaped terrace balcony with outdoor seating"
-                        dining_str = "✅ Complimentary Gourmet Family Breakfast Buffet included daily"
-                    elif "penthouse" in r_name.lower():
-                        bed_str = "3 Beds (1 Grand California King Bed + 2 Plush Queen Beds in Guest Suite)"
-                        balcony_str = "Wrap-around 360-degree private penthouse terrace with outdoor jacuzzi"
-                        dining_str = "✅ All-Inclusive VIP Dining with gourmet American breakfast served in-suite by private butler"
-                    else:
-                        bed_str = "Plush King or Queen Bed"
-                        balcony_str = "Private furnished balcony"
-                        dining_str = "Complimentary breakfast included with suites"
+                    price = int(r.get("price_per_night", 250.0))
+                    bed_str = get_room_bed(r)
+                    balcony_str = get_room_balcony(r)
+                    dining_str = get_room_dining(r)
 
                     room_lines.append(
                         f"🛏️ **{r_name}** — **${price}/night**\n"

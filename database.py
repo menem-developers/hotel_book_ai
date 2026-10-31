@@ -16,7 +16,7 @@ except Exception:
 
 logger = logging.getLogger(__name__)
 
-from seed_usa_airports import USA_LOCATIONS, USA_HOTELS, USA_ROOMS_TEMPLATE
+from seed_usa_airports import USA_LOCATIONS, USA_HOTELS, USA_ROOMS_TEMPLATE, get_rooms_for_hotel
 
 DEFAULT_LOCATIONS = USA_LOCATIONS
 DEFAULT_HOTELS = USA_HOTELS
@@ -31,17 +31,17 @@ class DatabaseManager:
         self._in_memory_bookings: Dict[str, Any] = {}
         self._connect()
 
-    def _connect(self):
+    def _connect(self, force: bool = False):
         import time
         now = time.time()
-        if now - self._last_connect_attempt < 30.0:
+        if not force and now - self._last_connect_attempt < 15.0:
             return
         self._last_connect_attempt = now
         try:
             self.client = MongoClient(
                 settings.MONGODB_URI,
-                serverSelectionTimeoutMS=1000,
-                connectTimeoutMS=1000
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000
             )
             self.db = self.client[settings.MONGODB_DB_NAME]
             self.client.admin.command('ping')
@@ -78,7 +78,15 @@ class DatabaseManager:
     def seed_database(self, force: bool = False, clear_bookings: bool = False) -> Dict[str, int]:
         """Seed default USA locations, hotels, and rooms into separate MongoDB collections."""
         if not self.is_connected:
-            self._connect()
+            self._connect(force=True)
+
+        if not self.is_connected or self.db is None:
+            return {
+                "locations": len(DEFAULT_LOCATIONS),
+                "hotels": len(DEFAULT_HOTELS),
+                "rooms": sum(len(get_rooms_for_hotel(h)) for h in DEFAULT_HOTELS),
+                "bookings": len(self._in_memory_bookings)
+            }
 
         loc_col = self.locations_collection
         hotel_col = self.hotels_collection
@@ -109,12 +117,13 @@ class DatabaseManager:
             all_hotels = list(hotel_col.find({}, {"_id": 0}))
             room_docs = []
             for h in all_hotels:
-                for r in DEFAULT_ROOMS_TEMPLATE:
+                hotel_rooms = get_rooms_for_hotel(h)
+                for r in hotel_rooms:
                     doc = dict(r)
                     doc["hotel_id"] = h["hotel_id"]
                     doc["hotel_name"] = h["name"]
                     doc["location_id"] = h["location_id"]
-                    doc["available_rooms"] = doc["total_rooms"]
+                    doc["available_rooms"] = doc.get("total_rooms", 5)
                     doc["created_at"] = datetime.utcnow()
                     doc["updated_at"] = datetime.utcnow()
                     room_docs.append(doc)
@@ -131,12 +140,13 @@ class DatabaseManager:
                 all_hotels = list(hotel_col.find({}, {"_id": 0}))
                 room_docs = []
                 for h in all_hotels:
-                    for r in DEFAULT_ROOMS_TEMPLATE:
+                    hotel_rooms = get_rooms_for_hotel(h)
+                    for r in hotel_rooms:
                         doc = dict(r)
                         doc["hotel_id"] = h["hotel_id"]
                         doc["hotel_name"] = h["name"]
                         doc["location_id"] = h["location_id"]
-                        doc["available_rooms"] = doc["total_rooms"]
+                        doc["available_rooms"] = doc.get("total_rooms", 5)
                         doc["created_at"] = datetime.utcnow()
                         doc["updated_at"] = datetime.utcnow()
                         room_docs.append(doc)
@@ -336,32 +346,33 @@ class DatabaseManager:
     # ==============================================================
     def get_all_rooms(self, hotel_id: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self.is_connected:
-            rooms = []
-            for r in DEFAULT_ROOMS_TEMPLATE:
-                doc = dict(r)
-                doc["hotel_id"] = hotel_id
-                doc["available_rooms"] = doc.get("total_rooms", 5)
-                rooms.append(doc)
-            return rooms
+            if hotel_id:
+                hotel_doc = self.get_hotel_by_id(hotel_id) or {"hotel_id": hotel_id}
+                return get_rooms_for_hotel(hotel_doc)
+            all_rooms = []
+            for h in DEFAULT_HOTELS:
+                all_rooms.extend(get_rooms_for_hotel(h))
+            return all_rooms
         try:
             filter_query = {"hotel_id": hotel_id} if hotel_id else {}
             rooms = list(self.rooms_collection.find(filter_query, {"_id": 0}))
             if not rooms:
-                rooms = []
-                for r in DEFAULT_ROOMS_TEMPLATE:
-                    doc = dict(r)
-                    doc["hotel_id"] = hotel_id
-                    doc["available_rooms"] = doc.get("total_rooms", 5)
-                    rooms.append(doc)
+                if hotel_id:
+                    hotel_doc = self.get_hotel_by_id(hotel_id) or {"hotel_id": hotel_id}
+                    return get_rooms_for_hotel(hotel_doc)
+                all_rooms = []
+                for h in DEFAULT_HOTELS:
+                    all_rooms.extend(get_rooms_for_hotel(h))
+                return all_rooms
             return rooms
         except Exception:
-            rooms = []
-            for r in DEFAULT_ROOMS_TEMPLATE:
-                doc = dict(r)
-                doc["hotel_id"] = hotel_id
-                doc["available_rooms"] = doc.get("total_rooms", 5)
-                rooms.append(doc)
-            return rooms
+            if hotel_id:
+                hotel_doc = self.get_hotel_by_id(hotel_id) or {"hotel_id": hotel_id}
+                return get_rooms_for_hotel(hotel_doc)
+            all_rooms = []
+            for h in DEFAULT_HOTELS:
+                all_rooms.extend(get_rooms_for_hotel(h))
+            return all_rooms
 
     def get_room_by_id_or_name(self, identifier: str, hotel_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         q = identifier.strip().lower()
