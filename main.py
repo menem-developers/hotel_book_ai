@@ -362,8 +362,8 @@ async def get_admin_stats():
 async def seed_database_endpoint():
     """Force re-seed default locations, hotels, and rooms."""
     try:
-        counts = db_manager.seed_database(force=True)
-        return {"success": True, "message": "Database seeded successfully.", "counts": counts}
+        counts = db_manager.seed_database(force=True, clear_bookings=True)
+        return {"success": True, "message": "Database seeded successfully with USA locations and hotels.", "counts": counts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

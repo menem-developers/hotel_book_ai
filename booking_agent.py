@@ -306,91 +306,113 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
         if h["hotel_id"].lower() in t:
             return (h, "exact", 1.0)
 
-    # 3. Check distinctive landmark keywords across all Indian hotels
+    # 3. Check distinctive landmark keywords across all USA hotels
     landmark_keywords = [
-        # Trichy
-        ("rockfort", "HTL-TRZ-ROCKFORT"),
-        ("srirangam", "HTL-TRZ-SRIRANGAM"),
-        ("cauvery", "HTL-TRZ-CAUVERY"),
-        ("central junction", "HTL-TRZ-JUNCTION"),
-        ("junction", "HTL-TRZ-JUNCTION"),
-        # Chennai
-        ("marina", "HTL-MAA-MARINA"),
-        ("omr", "HTL-MAA-OMR"),
-        ("it expressway", "HTL-MAA-OMR"),
-        ("guindy", "HTL-MAA-GUINDY"),
-        ("ecr", "HTL-MAA-ECR"),
-        ("east coast", "HTL-MAA-ECR"),
-        # Coimbatore
-        ("race course", "HTL-CJB-RACECOURSE"),
-        ("peelamedu", "HTL-CJB-TECHPARK"),
-        ("tech park", "HTL-CJB-TECHPARK"),
-        ("avinashi", "HTL-CJB-RESIDENCY"),
-        ("valparai", "HTL-CJB-FOOTHILLS"),
-        # Madurai
-        ("meenakshi", "HTL-IXM-HERITAGE"),
-        ("temple view", "HTL-IXM-HERITAGE"),
-        ("vaigai", "HTL-IXM-RIVER"),
-        ("bypass", "HTL-IXM-TOWER"),
-        ("thiruparankundram", "HTL-IXM-RETREAT"),
-        # Bengaluru
-        ("whitefield", "HTL-BLR-WHITEFIELD"),
-        ("indiranagar", "HTL-BLR-DOWNTOWN"),
-        ("cubbon", "HTL-BLR-GARDEN"),
-        ("electronic city", "HTL-BLR-TECHTOWER"),
-        ("electronic", "HTL-BLR-TECHTOWER"),
-        # Mangaluru
-        ("panambur", "HTL-IXE-BEACH"),
-        ("kadri", "HTL-IXE-HILLS"),
-        ("hampankatta", "HTL-IXE-CENTRAL"),
-        ("tannirbhavi", "HTL-IXE-COASTAL"),
-        # Kochi
-        ("fort kochi", "HTL-COK-HERITAGE"),
-        ("marine drive kochi", "HTL-COK-DOWNTOWN"),
-        ("panampilly", "HTL-COK-EXECUTIVE"),
-        ("vembanad", "HTL-COK-BACKWATER"),
-        ("backwater", "HTL-COK-BACKWATER"),
-        # Thiruvananthapuram
-        ("kovalam", "HTL-TRV-BEACH"),
-        ("cliff", "HTL-TRV-BEACH"),
-        ("palayam", "HTL-TRV-CITY"),
-        ("technopark", "HTL-TRV-TECHPARK"),
-        ("varkala", "HTL-TRV-HERITAGE"),
-        # Kozhikode
-        ("kappad", "HTL-CCJ-BEACH"),
-        ("mavoor", "HTL-CCJ-CITY"),
-        ("cyberpark", "HTL-CCJ-TECHPARK"),
-        ("beypore", "HTL-CCJ-HERITAGE"),
-        # Mumbai
-        ("marine drive", "HTL-BOM-DOWNTOWN"),
-        ("juhu", "HTL-BOM-JUHU"),
-        ("bandra", "HTL-BOM-BKC"),
-        ("bkc", "HTL-BOM-BKC"),
-        ("kurla", "HTL-BOM-BKC"),
-        ("colaba", "HTL-BOM-COLABA"),
-        # Delhi
-        ("aerocity", "HTL-DEL-AEROCITY"),
-        ("connaught", "HTL-DEL-CP"),
-        ("lutyens", "HTL-DEL-LUTYENS"),
-        ("dwarka", "HTL-DEL-DWARKA"),
-        # Hyderabad
-        ("hitec", "HTL-HYD-HITEC"),
-        ("cyberabad", "HTL-HYD-HITEC"),
-        ("banjara", "HTL-HYD-BANJARA"),
-        ("charminar", "HTL-HYD-DOWNTOWN"),
-        ("gachibowli", "HTL-HYD-TECHPARK"),
-        # Goa
-        ("calangute", "HTL-GOX-RESORT"),
-        ("candolim", "HTL-GOX-HERITAGE"),
-        ("panaji", "HTL-GOX-DOWNTOWN"),
-        ("panjim", "HTL-GOX-DOWNTOWN"),
-        ("morjim", "HTL-GOX-BEACH"),
-        # Kolkata
-        ("salt lake", "HTL-CCU-SALTLAKE"),
-        ("park street", "HTL-CCU-PARKSTREET"),
-        ("new town", "HTL-CCU-NEWTOWN"),
-        ("rajarhat", "HTL-CCU-NEWTOWN"),
-        ("howrah", "HTL-CCU-HERITAGE"),
+        # New York (JFK)
+        ("central park", "HTL-JFK-002"),
+        ("times square", "HTL-JFK-002"),
+        ("5th ave", "HTL-JFK-002"),
+        ("fifth avenue", "HTL-JFK-002"),
+        ("wall street", "HTL-JFK-003"),
+        ("fidi", "HTL-JFK-003"),
+        ("brooklyn bridge", "HTL-JFK-004"),
+        ("dumbo", "HTL-JFK-004"),
+        ("soho", "HTL-JFK-005"),
+        ("prince street", "HTL-JFK-005"),
+        # Los Angeles (LAX)
+        ("beverly hills", "HTL-LAX-002"),
+        ("rodeo drive", "HTL-LAX-002"),
+        ("santa monica", "HTL-LAX-003"),
+        ("ocean ave", "HTL-LAX-003"),
+        ("silicon beach", "HTL-LAX-004"),
+        ("playa vista", "HTL-LAX-004"),
+        ("hollywood", "HTL-LAX-005"),
+        ("sunset blvd", "HTL-LAX-005"),
+        ("hollywood hills", "HTL-LAX-005"),
+        # Chicago (ORD)
+        ("magnificent mile", "HTL-ORD-002"),
+        ("michigan ave", "HTL-ORD-002"),
+        ("the loop", "HTL-ORD-003"),
+        ("lasalle", "HTL-ORD-003"),
+        ("navy pier", "HTL-ORD-004"),
+        ("lake michigan", "HTL-ORD-004"),
+        ("gold coast", "HTL-ORD-005"),
+        # Miami (MIA)
+        ("south beach", "HTL-MIA-002"),
+        ("ocean drive", "HTL-MIA-002"),
+        ("brickell", "HTL-MIA-003"),
+        ("biscayne", "HTL-MIA-004"),
+        ("coral gables", "HTL-MIA-005"),
+        # San Francisco (SFO)
+        ("nob hill", "HTL-SFO-002"),
+        ("cable car", "HTL-SFO-002"),
+        ("silicon valley", "HTL-SFO-003"),
+        ("sand hill", "HTL-SFO-003"),
+        ("embarcadero", "HTL-SFO-004"),
+        ("ferry building", "HTL-SFO-004"),
+        ("union square", "HTL-SFO-005"),
+        # Dallas (DFW)
+        ("uptown dallas", "HTL-DFW-002"),
+        ("mckinney", "HTL-DFW-002"),
+        ("downtown dallas", "HTL-DFW-003"),
+        ("las colinas", "HTL-DFW-004"),
+        ("stockyards", "HTL-DFW-005"),
+        ("fort worth", "HTL-DFW-005"),
+        # Atlanta (ATL)
+        ("buckhead", "HTL-ATL-002"),
+        ("peachtree", "HTL-ATL-002"),
+        ("midtown atlanta", "HTL-ATL-003"),
+        ("centennial park", "HTL-ATL-004"),
+        ("perimeter", "HTL-ATL-005"),
+        # Seattle (SEA)
+        ("pike place", "HTL-SEA-002"),
+        ("puget sound", "HTL-SEA-002"),
+        ("south lake union", "HTL-SEA-003"),
+        ("slu", "HTL-SEA-003"),
+        ("elliott bay", "HTL-SEA-004"),
+        ("bellevue", "HTL-SEA-005"),
+        # Las Vegas (LAS)
+        ("the strip", "HTL-LAS-002"),
+        ("bellagio", "HTL-LAS-002"),
+        ("fremont", "HTL-LAS-003"),
+        ("red rock", "HTL-LAS-004"),
+        ("wynn", "HTL-LAS-005"),
+        # Boston (BOS)
+        ("back bay", "HTL-BOS-002"),
+        ("copley", "HTL-BOS-002"),
+        ("cambridge", "HTL-BOS-003"),
+        ("mit", "HTL-BOS-003"),
+        ("harvard", "HTL-BOS-003"),
+        ("seaport", "HTL-BOS-004"),
+        ("beacon hill", "HTL-BOS-005"),
+        # Washington D.C. (IAD)
+        ("georgetown", "HTL-IAD-002"),
+        ("potomac", "HTL-IAD-002"),
+        ("national mall", "HTL-IAD-003"),
+        ("white house", "HTL-IAD-003"),
+        ("pennsylvania ave", "HTL-IAD-003"),
+        ("capitol hill", "HTL-IAD-004"),
+        ("dupont circle", "HTL-IAD-005"),
+        ("embassy row", "HTL-IAD-005"),
+        # Orlando (MCO)
+        ("lake buena vista", "HTL-MCO-002"),
+        ("disney", "HTL-MCO-002"),
+        ("international drive", "HTL-MCO-003"),
+        ("universal", "HTL-MCO-004"),
+        ("winter park", "HTL-MCO-005"),
+        # Denver (DEN)
+        ("lodo", "HTL-DEN-002"),
+        ("union station", "HTL-DEN-002"),
+        ("cherry creek", "HTL-DEN-003"),
+        ("rocky mountains", "HTL-DEN-004"),
+        ("red rocks", "HTL-DEN-004"),
+        ("boulder", "HTL-DEN-005"),
+        # Houston (IAH)
+        ("galleria", "HTL-IAH-002"),
+        ("uptown houston", "HTL-IAH-002"),
+        ("energy corridor", "HTL-IAH-003"),
+        ("downtown houston", "HTL-IAH-004"),
+        ("the woodlands", "HTL-IAH-005"),
         # Airport keyword
         ("airport", "AIRPORT"),
     ]
@@ -948,7 +970,7 @@ class BookingAgent:
         loc_pats = [
             r'\b(?:change|different|switch|another|other|wrong|modify|edit)\b.*\b(?:location|city|airport|destination|place|hub)\b',
             r'\b(?:location|city|airport|destination|place|hub)\b.*\b(?:change|different|switch|another|other|wrong|modify|edit)\b',
-            r'\bnot\s+(?:chennai|delhi|mumbai|bangalore|bengaluru|coimbatore|trichy|madurai|kochi|goa)\b'
+            r'\bnot\s+(?:new york|los angeles|chicago|san francisco|miami|dallas|atlanta|seattle|las vegas|boston|washington|orlando|denver|houston)\b'
         ]
         if any(re.search(p, t) for p in loc_pats):
             return "location"
@@ -2528,7 +2550,7 @@ class BookingAgent:
                     "location_id": session.get("location_id"),
                     "location_city": session.get("location_city"),
                     "airport_code": session.get("airport_code"),
-                    "hotel_id": session.get("hotel_id", "HTL-DXB-AIRPORT"),
+                    "hotel_id": session.get("hotel_id", "HTL-JFK-001"),
                     "hotel_name": session.get("hotel_name", "Grand Azure Hotel"),
                     "hotel_address": session.get("hotel_address") or (db_manager.get_hotel_by_id(session.get("hotel_id")) or {}).get("address", ""),
                     "guest_type": session.get("guest_type", "individual"),

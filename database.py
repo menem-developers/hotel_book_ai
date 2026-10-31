@@ -8,11 +8,11 @@ import re
 
 logger = logging.getLogger(__name__)
 
-from seed_indian_airports import INDIAN_LOCATIONS, INDIAN_HOTELS, INDIAN_ROOMS_TEMPLATE
+from seed_usa_airports import USA_LOCATIONS, USA_HOTELS, USA_ROOMS_TEMPLATE
 
-DEFAULT_LOCATIONS = INDIAN_LOCATIONS
-DEFAULT_HOTELS = INDIAN_HOTELS
-DEFAULT_ROOMS_TEMPLATE = INDIAN_ROOMS_TEMPLATE
+DEFAULT_LOCATIONS = USA_LOCATIONS
+DEFAULT_HOTELS = USA_HOTELS
+DEFAULT_ROOMS_TEMPLATE = USA_ROOMS_TEMPLATE
 
 class DatabaseManager:
     def __init__(self):
@@ -63,32 +63,37 @@ class DatabaseManager:
     def bookings_collection(self):
         return self.db["bookings"]
 
-    def seed_database(self, force: bool = False) -> Dict[str, int]:
-        """Seed default locations, hotels, and rooms into separate MongoDB collections."""
+    def seed_database(self, force: bool = False, clear_bookings: bool = False) -> Dict[str, int]:
+        """Seed default USA locations, hotels, and rooms into separate MongoDB collections."""
         if not self.is_connected:
             self._connect()
 
-        # 1. Seed Locations
         loc_col = self.locations_collection
-        if loc_col.count_documents({}) == 0 or force:
-            if force:
-                loc_col.delete_many({})
-            loc_docs = [dict(loc, created_at=datetime.utcnow(), updated_at=datetime.utcnow()) for loc in DEFAULT_LOCATIONS]
-            loc_col.insert_many(loc_docs)
-
-        # 2. Seed Hotels
         hotel_col = self.hotels_collection
-        if hotel_col.count_documents({}) == 0 or force:
-            if force:
-                hotel_col.delete_many({})
-            hotel_docs = [dict(h, created_at=datetime.utcnow(), updated_at=datetime.utcnow()) for h in DEFAULT_HOTELS]
-            hotel_col.insert_many(hotel_docs)
-
-        # 3. Seed Rooms across Hotels
         room_col = self.rooms_collection
-        if room_col.count_documents({}) == 0 or force:
-            if force:
-                room_col.delete_many({})
+        book_col = self.bookings_collection
+        sess_col = self.sessions_collection
+
+        # Check if database needs USA migration
+        has_usa = loc_col.find_one({"country": "United States"}) is not None
+        should_reseed = force or (not has_usa)
+
+        if should_reseed or clear_bookings:
+            logger.info("Purging old records and seeding fresh USA airports, hotels, and rooms...")
+            loc_col.delete_many({})
+            hotel_col.delete_many({})
+            room_col.delete_many({})
+            book_col.delete_many({})
+            sess_col.delete_many({})
+
+            loc_docs = [dict(loc, created_at=datetime.utcnow(), updated_at=datetime.utcnow()) for loc in DEFAULT_LOCATIONS]
+            if loc_docs:
+                loc_col.insert_many(loc_docs)
+
+            hotel_docs = [dict(h, created_at=datetime.utcnow(), updated_at=datetime.utcnow()) for h in DEFAULT_HOTELS]
+            if hotel_docs:
+                hotel_col.insert_many(hotel_docs)
+
             all_hotels = list(hotel_col.find({}, {"_id": 0}))
             room_docs = []
             for h in all_hotels:
@@ -101,12 +106,36 @@ class DatabaseManager:
                     doc["created_at"] = datetime.utcnow()
                     doc["updated_at"] = datetime.utcnow()
                     room_docs.append(doc)
-            room_col.insert_many(room_docs)
+            if room_docs:
+                room_col.insert_many(room_docs)
+        else:
+            if loc_col.count_documents({}) == 0:
+                loc_docs = [dict(loc, created_at=datetime.utcnow(), updated_at=datetime.utcnow()) for loc in DEFAULT_LOCATIONS]
+                loc_col.insert_many(loc_docs)
+            if hotel_col.count_documents({}) == 0:
+                hotel_docs = [dict(h, created_at=datetime.utcnow(), updated_at=datetime.utcnow()) for h in DEFAULT_HOTELS]
+                hotel_col.insert_many(hotel_docs)
+            if room_col.count_documents({}) == 0:
+                all_hotels = list(hotel_col.find({}, {"_id": 0}))
+                room_docs = []
+                for h in all_hotels:
+                    for r in DEFAULT_ROOMS_TEMPLATE:
+                        doc = dict(r)
+                        doc["hotel_id"] = h["hotel_id"]
+                        doc["hotel_name"] = h["name"]
+                        doc["location_id"] = h["location_id"]
+                        doc["available_rooms"] = doc["total_rooms"]
+                        doc["created_at"] = datetime.utcnow()
+                        doc["updated_at"] = datetime.utcnow()
+                        room_docs.append(doc)
+                if room_docs:
+                    room_col.insert_many(room_docs)
 
         return {
             "locations": loc_col.count_documents({}),
             "hotels": hotel_col.count_documents({}),
-            "rooms": room_col.count_documents({})
+            "rooms": room_col.count_documents({}),
+            "bookings": book_col.count_documents({})
         }
 
     # Backward compatibility helper
