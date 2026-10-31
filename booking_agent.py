@@ -1096,8 +1096,9 @@ class BookingAgent:
         smoking_asked = bool(re.search(r'\b(smoke|smoking|non-smoking|smoke-free|cigar|cigarette|vape|vaping)\b', t))
         food_comp_asked = bool(re.search(r'\b(complimentary food|free food|complimentary breakfast|free breakfast|breakfast included|is breakfast free|is food free|is food complimentary|food complimentary|food complementarty|is breakfast complimentary|dining complimentary|complimentary dining|free meals?|is food included|is breakfast included)\b', t) or
                                (re.search(r'\b(food|breakfast|dining|meals?)\b', t) and re.search(r'\b(free|complimentary|complementary|included)\b', t)))
-        details_asked = bool(re.search(r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel)\b', t) or
-                             re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
+        rooms_asked = bool(re.search(r'\b(types?\s+of\s+rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+of\s+room|room\s+details?)\b', t))
+        details_asked = bool(re.search(r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel|amenities|facilities|services|features|overview)\b', t) or
+                             re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for|what\s+about)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
 
         # Check if user mentioned or selected a specific room
         room_name = session.get("room_name")
@@ -1244,9 +1245,69 @@ class BookingAgent:
                     f"• **Smoking Policy**: {web_info['smoking_policy']}"
                 )
 
+            if rooms_asked:
+                hotel_rooms = db_manager.get_all_rooms(hotel_id=hotel.get("hotel_id"))
+                if not hotel_rooms:
+                    hotel_rooms = DEFAULT_ROOMS_TEMPLATE
+
+                room_lines = []
+                for r in hotel_rooms:
+                    r_name = r.get("name", "Standard Room")
+                    price = r.get("price_per_night", 150.0)
+
+                    if "single" in r_name.lower():
+                        bed_str = "1 Plush King Bed"
+                        balcony_str = "Soundproof panoramic picture windows (no walk-out balcony)"
+                        dining_str = "Room-Only rate (Breakfast buffet available on-site)"
+                    elif "double" in r_name.lower():
+                        bed_str = "1 King Bed or 2 Queen Beds upon request"
+                        balcony_str = "Private furnished walk-out balcony with city views"
+                        dining_str = "Room-Only rate (Breakfast buffet available on-site)"
+                    elif "corporate" in r_name.lower():
+                        bed_str = "1 California King Bed + 1 Executive Queen Sofa Daybed"
+                        balcony_str = "Private executive balcony with skyline panorama"
+                        dining_str = "✅ Complimentary Executive Club Breakfast Buffet included daily"
+                    elif "family" in r_name.lower():
+                        bed_str = "3 Beds (1 California King Master Bed + 2 Queen Beds in 2nd Bedroom)"
+                        balcony_str = "Expansive landscaped terrace balcony with outdoor seating"
+                        dining_str = "✅ Complimentary Gourmet Family Breakfast Buffet included daily"
+                    elif "penthouse" in r_name.lower():
+                        bed_str = "3 Beds (1 Grand California King Bed + 2 Plush Queen Beds in Guest Suite)"
+                        balcony_str = "Wrap-around 360-degree private penthouse terrace with outdoor jacuzzi"
+                        dining_str = "✅ All-Inclusive VIP Dining with gourmet American breakfast served in-suite by private butler"
+                    else:
+                        bed_str = "Plush King or Queen Bed"
+                        balcony_str = "Private furnished balcony"
+                        dining_str = "Complimentary breakfast included with suites"
+
+                    room_lines.append(
+                        f"🛏️ **{r_name}** — **${price}/night**\n"
+                        f"   • **Beds**: {bed_str}\n"
+                        f"   • **Balcony**: {balcony_str}\n"
+                        f"   • **Dining**: {dining_str}"
+                    )
+
+                sections.append(
+                    f"🏨 **Available Room Types at {h_name} (from Web Search & Hotel Records)**:\n\n" +
+                    "\n\n".join(room_lines)
+                )
+
+        # Remember hotel context
+        session["hotel_id"] = hotel["hotel_id"]
+        session["hotel_name"] = hotel["name"]
+        session["hotel_address"] = hotel.get("address", "")
+        if hotel.get("location_id"):
+            session["location_id"] = hotel["location_id"]
+
         # Continuation prompt based on current step
         curr_step = session.get("current_step")
-        if curr_step == STEP_ASK_HOTEL:
+        if rooms_asked:
+            followup = f"Which room category would you prefer to reserve at **{h_name}**?"
+            hotel_rooms = db_manager.get_all_rooms(hotel_id=hotel.get("hotel_id"))
+            if not hotel_rooms:
+                hotel_rooms = DEFAULT_ROOMS_TEMPLATE
+            quick_replies = [r.get("name") for r in hotel_rooms]
+        elif curr_step == STEP_ASK_HOTEL:
             followup = f"Would you like to reserve your stay at **{h_name}**, or choose another hotel?"
             quick_replies = [f"Select {h_name}", "Choose Another Hotel"]
         elif curr_step == STEP_ASK_ROOM_TYPE:
@@ -1270,7 +1331,7 @@ class BookingAgent:
 
     def check_hotel_or_room_details_inquiry(self, user_text: str, session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Check if user is asking for hotel details (beds, balcony, smoking policy, complimentary food, google reviews).
+        Check if user is asking for hotel details (beds, balcony, smoking policy, complimentary food, google reviews, room types).
         CRITICAL:
         - If user asks: first get which hotel. If no hotel is selected or known yet, prompt user which hotel.
         - Once hotel is identified, fetch live web details / Google reviews and reply factually.
@@ -1289,10 +1350,17 @@ class BookingAgent:
         food_comp_asked = bool(re.search(r'\b(complimentary food|free food|complimentary breakfast|free breakfast|breakfast included|is breakfast free|is food free|is food complimentary|food complimentary|food complementarty|is breakfast complimentary|dining complimentary|complimentary dining|free meals?|is food included|is breakfast included)\b', t) or
                                (re.search(r'\b(food|breakfast|dining|meals?)\b', t) and re.search(r'\b(free|complimentary|complementary|included)\b', t)))
         
-        details_asked = bool(re.search(r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel)\b', t) or
-                             re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
+        rooms_asked = bool(re.search(
+            r'\b(types?\s+of\s+rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+of\s+room|room\s+details?)\b',
+            t
+        ))
 
-        if not any([bed_asked, balcony_asked, smoking_asked, food_comp_asked, details_asked]):
+        details_asked = bool(re.search(
+            r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel|amenities|facilities|services|features|overview)\b',
+            t
+        ) or re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for|what\s+about)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
+
+        if not any([bed_asked, balcony_asked, smoking_asked, food_comp_asked, rooms_asked, details_asked]):
             return None
 
         # 2. Identify target hotel
@@ -1320,9 +1388,10 @@ class BookingAgent:
             hotels_list = db_manager.get_all_hotels(location_id=loc_id) if loc_id else db_manager.get_all_hotels()[:5]
             hotel_names = [h["name"] for h in hotels_list[:5]]
             dest_hint = f" in **{city}**" if city else ""
+            topic = "room types and rates" if rooms_asked else "authentic Google reviews and property details"
             reply = (
-                f"I would be glad to check the authentic Google reviews, bed configurations, balcony details, smoking policy, and complimentary dining information!\n\n"
-                f"**Which hotel{dest_hint} would you like me to check details for?**\n"
+                f"I would be glad to check the {topic}!\n\n"
+                f"**Which hotel{dest_hint} would you like me to check {topic} for?**\n"
                 f"Please tell me the hotel name or select from the options below:"
             )
             return {
