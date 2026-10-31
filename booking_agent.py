@@ -336,6 +336,14 @@ def is_inquiring_about_booking(text: str, has_active_booking: bool = False) -> b
         return False
     if re.search(r'\b(types?\s+(?:of\s+)?rooms?|room\s+types?|what\s+(?:are\s+the\s+)?rooms?|available\s+rooms?|room\s+options)\b', t):
         return False
+
+    # 0.2 Check if user is asking for hotel or room property details (reviews, specs, amenities, policies)
+    # e.g. "tell me my hotel details", "give me hotel details", "hotel info", "details about my hotel"
+    if re.search(r'\b(?:hotel|room|property)\s+(?:details|info|information|specs|overview|features|amenities|reviews?)\b', t) or \
+       re.search(r'\b(?:details|info|information|amenities|reviews?)\s+(?:about|of|on|for)\s+(?:my\s+)?(?:hotel|room|property)\b', t) or \
+       re.search(r'\b(?:my\s+hotel\s+details|my\s+room\s+details|hotel\s+details|room\s+details)\b', t) or \
+       re.search(r'\b(?:tell\s+me\s+about\s+(?:my\s+)?hotel|about\s+(?:my\s+)?hotel)\b', t):
+        return False
     
     # 1. Direct booking reference regex (e.g. BK-AC9EF9)
     if re.search(r"\bbk-[a-z0-9]{4,8}\b", t):
@@ -1488,13 +1496,16 @@ class BookingAgent:
             cand, match_type, _ = check_hotel_match_with_fuzzy(user_text, location_id=None)
             if cand and match_type == "exact":
                 matched_hotel = cand
-        if not matched_hotel and (session.get("hotel_id") or session.get("hotel_name")):
-            h_id = session.get("hotel_id") or session.get("hotel_name")
-            matched_hotel = db_manager.get_hotel_by_id_or_name(h_id)
-        elif not matched_hotel and session.get("booking_id"):
+        if not matched_hotel and session.get("hotel_id"):
+            matched_hotel = db_manager.get_hotel_by_id_or_name(session["hotel_id"])
+        if not matched_hotel and session.get("hotel_name"):
+            matched_hotel = db_manager.get_hotel_by_id_or_name(session["hotel_name"])
+        if not matched_hotel and session.get("booking_id"):
             b = db_manager.get_booking_by_id(session["booking_id"])
             if b and b.get("hotel_name"):
                 matched_hotel = db_manager.get_hotel_by_id_or_name(b.get("hotel_name"))
+            if not matched_hotel and b and b.get("hotel_id"):
+                matched_hotel = db_manager.get_hotel_by_id_or_name(b.get("hotel_id"))
 
         # If hotel is not known yet, prompt user which hotel to check details for
         if not matched_hotel:
