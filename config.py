@@ -21,4 +21,8 @@ class Settings:
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2:1b")
     OLLAMA_TIMEOUT: float = float(os.getenv("OLLAMA_TIMEOUT", "45.0"))
 
+    # SerpApi Settings (Real-Time Hotel Details & Google Reviews)
+    SERPAPI_API_KEY: str = os.getenv("SERPAPI_API_KEY", "4cefc24c4e2d0e0e05a1091244f3a591e262dc75a6bbd25fe9712afd6205e8c8")
+    SERPAPI_BASE_URL: str = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com/search.json")
+
 settings = Settings()

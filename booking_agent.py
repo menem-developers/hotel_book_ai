@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from difflib import SequenceMatcher
 from database import db_manager, DEFAULT_ROOMS_TEMPLATE
 from ollama_client import ollama_client
+from config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -80,141 +81,163 @@ HOTEL_FAQ_KNOWLEDGE = {
     "parking": "Valet parking and secure underground self-parking are available 24/7 for all hotel guests."
 }
 
+_HOTEL_WEB_CACHE: Dict[str, Dict[str, Any]] = {}
+
 def fetch_hotel_web_details(hotel_name: str, user_text: str = "") -> Dict[str, Any]:
     """
-    Dynamically scrape live web search and Google/traveler reviews for a hotel in real time.
-    Searches via DDGS (DuckDuckGo Search) across TripAdvisor, Google Reviews, and official hotel pages
-    for authentic traveler ratings, reviews, smoking policies, balconies, and complimentary dining.
-    No hardcoded profiles are stored.
+    Dynamically scrape live web details and Google Reviews for a hotel in real time
+    using SerpApi (Google Search Engine).
+
+    Uses SERPAPI_API_KEY and SERPAPI_BASE_URL.
+    If SerpApi does not provide a value for any attribute, it is explicitly set
+    as 'Not Available' with zero fake defaults.
     """
     clean_name = hotel_name.strip()
-    snippets = []
-    sources = []
+    cache_key = clean_name.lower()
+    if cache_key in _HOTEL_WEB_CACHE:
+        return _HOTEL_WEB_CACHE[cache_key]
+
+    api_key = getattr(settings, "SERPAPI_API_KEY", "4cefc24c4e2d0e0e05a1091244f3a591e262dc75a6bbd25fe9712afd6205e8c8")
+    base_url = getattr(settings, "SERPAPI_BASE_URL", "https://serpapi.com/search.json")
+
+    kg_rating = None
+    kg_reviews = None
+    kg_desc = ""
+    user_revs: List[str] = []
+    all_snippets: List[str] = []
+    sources: List[str] = []
 
     try:
-        try:
-            from ddgs import DDGS
-        except ImportError:
-            from duckduckgo_search import DDGS
+        # Query 1: Google Reviews and Rating
+        params1 = {
+            "engine": "google",
+            "q": f"{clean_name} hotel Google reviews rating",
+            "api_key": api_key
+        }
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp1 = client.get(base_url, params=params1)
+            if resp1.status_code == 200:
+                data1 = resp1.json()
+                kg = data1.get("knowledge_graph", {})
+                kg_rating = kg.get("rating")
+                kg_reviews = kg.get("review_count") or kg.get("reviews_count") or kg.get("reviews")
+                kg_desc = kg.get("description", "")
+                user_revs = [r.get("summary") for r in kg.get("user_reviews", []) if r.get("summary")]
 
-        with DDGS() as ddgs:
-            # Query 1: Google reviews, traveler ratings, feedback
-            q1 = f"{clean_name} hotel Google reviews rating traveler feedback"
-            for r in ddgs.text(q1, max_results=3):
-                title = r.get("title", "")
-                body = r.get("body", "")
-                href = r.get("href", "")
-                if body:
-                    snippets.append({"title": title, "body": body, "href": href})
-                    if href:
-                        domain = re.sub(r'^https?://(?:www\.)?([^/]+).*', r'\1', href)
-                        if domain and domain not in sources:
-                            sources.append(domain)
+                sources.append("Google Knowledge Graph")
 
-            # Query 2: Smoking policy, balcony, breakfast & dining
-            q2 = f"{clean_name} hotel smoking policy balcony breakfast"
-            for r in ddgs.text(q2, max_results=3):
-                title = r.get("title", "")
-                body = r.get("body", "")
-                href = r.get("href", "")
-                if body:
-                    snippets.append({"title": title, "body": body, "href": href})
-                    if href:
-                        domain = re.sub(r'^https?://(?:www\.)?([^/]+).*', r'\1', href)
-                        if domain and domain not in sources:
-                            sources.append(domain)
+                for r in data1.get("organic_results", [])[:5]:
+                    snip = r.get("snippet", "")
+                    if snip:
+                        all_snippets.append(snip)
+
+            # Query 2: Smoking policy, balcony, breakfast / dining
+            params2 = {
+                "engine": "google",
+                "q": f"{clean_name} hotel smoking policy balcony breakfast",
+                "api_key": api_key
+            }
+            resp2 = client.get(base_url, params=params2)
+            if resp2.status_code == 200:
+                data2 = resp2.json()
+                for r in data2.get("organic_results", [])[:6]:
+                    snip = r.get("snippet", "")
+                    if snip:
+                        all_snippets.append(snip)
+                sources.append("Google Search via SerpApi")
     except Exception as e:
-        logger.warning(f"Live web search note: {e}")
+        logger.warning(f"SerpApi query error for {clean_name}: {e}")
 
-    # Fallback to direct HTML scrape if ddgs yielded nothing
-    if not snippets:
-        try:
-            query = f"{clean_name} hotel google reviews traveler feedback smoking balcony breakfast"
-            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            with httpx.Client(timeout=2.0, follow_redirects=True) as client:
-                res = client.get(url, headers=headers)
-                if res.status_code == 200:
-                    raw_snips = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', res.text, flags=re.S)
-                    for s in raw_snips[:3]:
-                        clean_s = re.sub(r'<[^>]+>', '', s).strip()
-                        if clean_s and len(clean_s) > 25:
-                            snippets.append({"title": "", "body": clean_s, "href": ""})
-        except Exception:
-            pass
+    # Relevant keyword filter to prevent generic snippets from unrelated hotels
+    hotel_keywords = [w.lower() for w in re.findall(r"[A-Za-z0-9]+", clean_name) if len(w) > 3 and w.lower() not in ["hotel", "resort", "the", "airport", "inn", "suites", "palace", "york"]]
+    if not hotel_keywords:
+        hotel_keywords = [w.lower() for w in re.findall(r"[A-Za-z0-9]+", clean_name) if len(w) > 2]
 
-    all_text = " ".join([s["title"] + ". " + s["body"] for s in snippets])
+    filtered_snippets: List[str] = []
+    if kg_desc:
+        filtered_snippets.append(kg_desc)
+    for s in all_snippets:
+        s_low = s.lower()
+        if any(k in s_low for k in hotel_keywords):
+            filtered_snippets.append(s)
 
-    # Extract score and review count
-    rate_m = re.search(r'(?:rated\s+([3-5](?:\.[0-9])?)\s*(?:of\s*5|\/5|stars?)|\b([3-5]\.[0-9])\s*(?:of\s*5|stars?|\/5|★|⭐))', all_text, re.I)
-    score = (rate_m.group(1) or rate_m.group(2)) if rate_m else None
-    reviews_m = re.search(r'([\d,]+)\s*(?:traveler reviews|reviews|ratings|Google reviews)', all_text, re.I)
-
-    if score and reviews_m:
-        rating_str = f"{score} ⭐ ({reviews_m.group(1)} Verified Google / Traveler Reviews)"
-    elif score:
-        rating_str = f"{score} ⭐ (Verified Google / Traveler Rating)"
-    elif reviews_m:
-        rating_str = f"4.6 ⭐ ({reviews_m.group(1)} Verified Google / Traveler Reviews)"
+    # 1. Authentic Rating
+    if kg_rating and kg_reviews:
+        rating_str = f"{kg_rating} ⭐ ({kg_reviews:,} Verified Google Reviews)"
+    elif kg_rating:
+        rating_str = f"{kg_rating} ⭐ (Verified Google Rating)"
     else:
-        rating_str = "4.6 ⭐ (Google Traveler Rating)"
+        # Check organic rich snippets
+        rich_rating = None
+        rich_revs = None
+        for s in filtered_snippets:
+            m_rate = re.search(r'\b([3-5]\.[0-9])\s*(?:of\s*5|stars?|\/5|★|⭐)', s, re.I)
+            m_revs = re.search(r'([\d,]+)\s*(?:traveler reviews|reviews|ratings|Google reviews)', s, re.I)
+            if m_rate:
+                rich_rating = m_rate.group(1)
+            if m_revs:
+                rich_revs = m_revs.group(1)
+            if rich_rating:
+                break
+        if rich_rating and rich_revs:
+            rating_str = f"{rich_rating} ⭐ ({rich_revs} Verified Reviews)"
+        elif rich_rating:
+            rating_str = f"{rich_rating} ⭐ (Verified Rating)"
+        else:
+            rating_str = "Not Available from official records"
 
-    # Extract authentic traveler review sentences
-    summary_sentences = []
-    for s in snippets:
-        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
-            sent_clean = sent.strip()
-            if len(sent_clean) > 35 and any(k in sent_clean.lower() for k in [
-                "highlight", "praise", "rated", "luxury", "hotel", "stay", "view", "service", "experience", "loved", "rooms", "location"
-            ]):
-                if sent_clean not in summary_sentences and not any(sent_clean in exist for exist in summary_sentences):
-                    summary_sentences.append(sent_clean)
-
-    if summary_sentences:
-        summary_str = " ".join(summary_sentences[:2])
+    # 2. Authentic Reviews Summary
+    if user_revs:
+        summary_str = " | ".join([f'"{rev}"' for rev in user_revs[:3]])
+    elif kg_desc:
+        summary_str = kg_desc
     else:
-        summary_str = f"Travelers praise the prime location, luxury accommodations, attentive concierge, and verified 5-star guest services at {clean_name}."
-
-    # Extract authentic smoking policy
-    smoking_sentences = []
-    for s in snippets:
-        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
-            if any(k in sent.lower() for k in ["smoke", "smoking", "smoke-free", "non-smoking"]):
+        # Extract authentic traveler review sentences
+        rev_sentences = []
+        for snip in filtered_snippets:
+            for sent in re.split(r'(?<=[.!?])\s+', snip):
                 sent_clean = sent.strip()
-                if len(sent_clean) > 20 and sent_clean not in smoking_sentences:
-                    smoking_sentences.append(sent_clean)
+                if len(sent_clean) > 25 and any(k in sent_clean.lower() for k in ["great", "service", "clean", "location", "view", "stay", "loved", "friendly", "comfortable", "staff", "room"]):
+                    if sent_clean not in rev_sentences and not any(sent_clean in exist for exist in rev_sentences):
+                        rev_sentences.append(sent_clean)
+        if rev_sentences:
+            summary_str = " ".join(rev_sentences[:2])
+        else:
+            summary_str = "Not Available (No verified traveler review summary available from public records)"
 
-    if smoking_sentences:
-        smoking_str = smoking_sentences[0]
-        if not re.search(r'non-smoking|smoke-free', smoking_str, re.I):
-            smoking_str = f"{smoking_str}. (Strictly 100% non-smoking inside all guest rooms; designated outdoor areas only)."
-    else:
-        smoking_str = "100% Smoke-Free Property. All guest rooms, suites, and indoor areas are strictly non-smoking. Designated outdoor smoking area is provided outside the main entrance."
-
-    # Extract authentic balcony details
-    balcony_sentences = []
-    for s in snippets:
-        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
-            if any(k in sent.lower() for k in ["balcony", "balconies", "terrace", "terraces", "patio", "courtyard"]):
+    # 3. Authentic Smoking Policy
+    smoking_matches = []
+    for snip in filtered_snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', snip):
+            if re.search(r'\b(smoke|smoking|non-smoking|smoke-free)\b', sent, re.I):
                 sent_clean = sent.strip()
-                if len(sent_clean) > 20 and sent_clean not in balcony_sentences:
-                    balcony_sentences.append(sent_clean)
+                if len(sent_clean) > 15 and sent_clean not in smoking_matches:
+                    smoking_matches.append(sent_clean)
+    smoking_str = smoking_matches[0] if smoking_matches else "Not Available in public records (Please verify directly with hotel front desk)"
 
-    balcony_note = balcony_sentences[0] if balcony_sentences else None
-
-    # Extract authentic dining & breakfast details
-    dining_sentences = []
-    for s in snippets:
-        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
-            if any(k in sent.lower() for k in ["breakfast", "dining", "restaurant", "buffet", "complimentary", "chef", "menu"]):
+    # 4. Authentic Balcony Details
+    balcony_matches = []
+    for snip in filtered_snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', snip):
+            if re.search(r'\b(balcony|balconies|terrace|terraces|patio)\b', sent, re.I):
                 sent_clean = sent.strip()
-                if len(sent_clean) > 25 and sent_clean not in dining_sentences:
-                    dining_sentences.append(sent_clean)
+                if len(sent_clean) > 15 and sent_clean not in balcony_matches:
+                    balcony_matches.append(sent_clean)
+    balcony_note = balcony_matches[0] if balcony_matches else "Not Available in public records"
 
-    special_dining = dining_sentences[0] if dining_sentences else None
-    source_citation = f"Live Web & Google Search ({', '.join(sources[:3])})" if sources else "Live Web Search"
+    # 5. Authentic Dining Details
+    dining_matches = []
+    for snip in filtered_snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', snip):
+            if re.search(r'\b(breakfast|dining|restaurant|buffet|complimentary breakfast|free breakfast)\b', sent, re.I):
+                sent_clean = sent.strip()
+                if len(sent_clean) > 15 and sent_clean not in dining_matches:
+                    dining_matches.append(sent_clean)
+    special_dining = dining_matches[0] if dining_matches else "Not Available in public records"
 
-    return {
+    source_citation = "Google Search & Reviews via SerpApi"
+
+    result = {
         "hotel_name": clean_name,
         "rating": rating_str,
         "summary": summary_str,
@@ -223,6 +246,9 @@ def fetch_hotel_web_details(hotel_name: str, user_text: str = "") -> Dict[str, A
         "special_dining": special_dining,
         "source": source_citation
     }
+
+    _HOTEL_WEB_CACHE[cache_key] = result
+    return result
 
 def clean_company_name(text: str) -> str:
     """Strip common conversational prefixes like 'it s', 'it's', 'its', 'company is'."""
@@ -980,6 +1006,8 @@ class BookingAgent:
         if session_id:
             session = db_manager.get_session(session_id)
             if session:
+                if "session_id" not in session:
+                    session["session_id"] = session_id
                 return session
 
         new_session_id = session_id or str(uuid.uuid4())
@@ -1260,13 +1288,15 @@ class BookingAgent:
         balcony_desc = "\n".join([f"• **{r.get('name', 'Room')}**: {get_room_balcony(r)}" for r in hotel_rooms])
         dining_desc = "\n".join([f"• **{r.get('name', 'Room')}**: {get_room_dining(r)}" for r in hotel_rooms])
 
+        sum_display = web_info['summary']
+
         if is_comprehensive:
             source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
             sections.append(
                 f"🌐 **Authentic Web & Google Reviews Details for {h_name}**{source_lbl}:\n\n"
                 f"⭐ **Google Rating & Traveler Reviews**:\n"
                 f"• **Rating**: {web_info['rating']}\n"
-                f"• **Traveler Reviews Summary**: \"{web_info['summary']}\""
+                f"• **Traveler Reviews Summary**: {sum_display}"
             )
 
             # Bed details
@@ -1276,7 +1306,7 @@ class BookingAgent:
             )
 
             # Balcony details
-            balcony_custom = f"\n• *Live Property Note*: {web_info['balcony_note']}" if web_info.get("balcony_note") else ""
+            balcony_custom = f"\n• *Live Property Record*: {web_info['balcony_note']}" if web_info.get("balcony_note") and web_info['balcony_note'] != "Not Available in public records" else "\n• *Live Property Record*: Not Available in public records"
             sections.append(
                 f"🌅 **Balcony & Terrace Specifications**:\n"
                 f"{balcony_desc}"
@@ -1286,12 +1316,11 @@ class BookingAgent:
             # Smoking policy
             sections.append(
                 "🚭 **Smoking Policy**:\n"
-                f"• **Policy**: {web_info['smoking_policy']}\n"
-                "• **Guest Rooms & Balconies**: Strictly 100% Non-Smoking. Permitted only in designated exterior outdoor areas."
+                f"• **Policy**: {web_info['smoking_policy']}"
             )
 
             # Food / Complimentary Dining
-            special_dining = f"\n• *Signature Dining*: {web_info['special_dining']}" if web_info.get("special_dining") else ""
+            special_dining = f"\n• *Dining Record*: {web_info['special_dining']}" if web_info.get("special_dining") and web_info['special_dining'] != "Not Available in public records" else "\n• *Dining Record*: Not Available in public records"
             sections.append(
                 f"🍳 **Food & Complimentary Dining**:\n"
                 f"{dining_desc}"
@@ -1317,7 +1346,7 @@ class BookingAgent:
                     balc_text = f"• **{cand_r.get('name')}**: {get_room_balcony(cand_r)}"
                 else:
                     balc_text = balcony_desc
-                balcony_note = f"\n\n*Property Note*: {web_info['balcony_note']}" if web_info.get("balcony_note") else ""
+                balcony_note = f"\n\n*Property Record*: {web_info['balcony_note']}" if web_info.get("balcony_note") else ""
                 prefix_room = f" for **{room_name}**" if room_name else ""
                 sections.append(
                     f"🌅 **Balcony Details{prefix_room} at {h_name} (from Web Search & Hotel Records)**:\n\n"
@@ -1328,8 +1357,7 @@ class BookingAgent:
                 source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
                 sections.append(
                     f"🚭 **Smoking Policy for {h_name}**{source_lbl}:\n\n"
-                    f"• **Policy**: {web_info['smoking_policy']}\n"
-                    "• **Guest Rooms & Balconies**: Strictly 100% Non-Smoking. Permitted only in designated exterior outdoor zones outside the main entrance."
+                    f"• **Policy**: {web_info['smoking_policy']}"
                 )
 
             if food_comp_asked:
@@ -1337,7 +1365,7 @@ class BookingAgent:
                     din_text = f"• **{cand_r.get('name')}**: {get_room_dining(cand_r)}"
                 else:
                     din_text = dining_desc
-                special_dining = f"\n\n*Signature Dining*: {web_info['special_dining']}" if web_info.get("special_dining") else ""
+                special_dining = f"\n\n*Dining Record*: {web_info['special_dining']}" if web_info.get("special_dining") else ""
                 source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
                 sections.append(
                     f"🍳 **Complimentary Food & Breakfast Details at {h_name}**{source_lbl}:\n\n"
@@ -1349,9 +1377,11 @@ class BookingAgent:
                 sections.append(
                     f"🏨 **Google Reviews & Details for {h_name}**{source_lbl}:\n\n"
                     f"• **Google Rating**: {web_info['rating']}\n"
-                    f"• **Traveler Reviews Summary**: \"{web_info['summary']}\"\n"
-                    f"• **Location / Address**: {hotel.get('address', '')}\n"
-                    f"• **Smoking Policy**: {web_info['smoking_policy']}"
+                    f"• **Traveler Reviews Summary**: {sum_display}\n"
+                    f"• **Location / Address**: {hotel.get('address', 'Not Available')}\n"
+                    f"• **Smoking Policy**: {web_info['smoking_policy']}\n"
+                    f"• **Balcony Details**: {web_info['balcony_note']}\n"
+                    f"• **Dining / Breakfast**: {web_info['special_dining']}"
                 )
 
             if rooms_asked:
