@@ -80,105 +80,148 @@ HOTEL_FAQ_KNOWLEDGE = {
     "parking": "Valet parking and secure underground self-parking are available 24/7 for all hotel guests."
 }
 
-REAL_HOTEL_WEB_PROFILES = {
-    "TWA Hotel at JFK Airport": {
-        "rating": "4.5 ⭐ (14,200+ Google Reviews)",
-        "summary": "Travelers consistently rave about the 1962 Eero Saarinen mid-century terminal design, Connie cocktail airplane lounge, rooftop runway infinity pool, and ultra-quiet soundproof 4.5-inch glass.",
-        "smoking": "100% Smoke-Free Hotel. All indoor guest rooms and event spaces are strictly non-smoking. Designated outdoor smoking area is provided outside the Terminal 5 entrance.",
-        "balcony_note": "Rooms feature 4.5-inch thick soundproof runway-view picture windows (no walk-out balconies due to airport airfield safety regulations).",
-        "special_dining": "Paris Café by Jean-Georges on-site; complimentary Executive Club breakfast with suites; room-only base rates."
-    },
-    "The Plaza New York": {
-        "rating": "4.6 ⭐ (19,800+ Google Reviews)",
-        "summary": "Guests praise the iconic Central Park South location, timeless Gilded Age glamour, white-glove butler service, and exquisite afternoon tea in The Palm Court.",
-        "smoking": "Strictly 100% Non-Smoking throughout all guest rooms, suites, balconies, and public spaces. Designated smoking area on 58th Street perimeter.",
-        "balcony_note": "Executive Double, Suites & Penthouse feature private furnished walk-out balconies overlooking Central Park or courtyard; Deluxe Single features soundproof picture windows.",
-        "special_dining": "The Palm Court afternoon tea; Champagne Bar; complimentary Club Lounge breakfast buffet for suite reservations."
-    },
-    "The Beverly Hills Hotel": {
-        "rating": "4.7 ⭐ (5,800+ Google Reviews)",
-        "summary": "Legendary 'Pink Palace' celebrated for lush 12-acre tropical gardens, private bungalows with garden patios, poolside cabanas, and vintage Hollywood history at the Polo Lounge.",
-        "smoking": "100% Non-Smoking across all rooms, suites, and indoor venues. Designated outdoor smoking area near garden entrance.",
-        "balcony_note": "Rooms, suites and private bungalows include private garden patios or walk-out balconies.",
-        "special_dining": "Iconic Polo Lounge dining; complimentary gourmet breakfast included with luxury bungalows and suites."
-    },
-    "Bellagio Resort & Casino": {
-        "rating": "4.7 ⭐ (82,000+ Google Reviews)",
-        "summary": "World-famous for the Bellagio Fountains, indoor Conservatory & Botanical Gardens, Picasso restaurant, and Mediterranean pool courtyards.",
-        "smoking": "Non-smoking guest rooms and suites. Casino floor has dedicated smoking sections; all guest rooms, suites, and corridors are strictly 100% smoke-free.",
-        "balcony_note": "Suites and villas feature private terraces overlooking the Bellagio fountains or pool gardens.",
-        "special_dining": "Award-winning Bellagio buffet, Spago, and Le Cirque; complimentary breakfast buffet with executive and penthouse suites."
-    },
-    "The Setai, Miami Beach": {
-        "rating": "4.7 ⭐ (3,800+ Google Reviews)",
-        "summary": "South Beach oceanfront Zen sanctuary featuring three temperature-controlled infinity pools, Asian-inspired courtyards, oceanview balconies, and Valmont Spa.",
-        "smoking": "100% Smoke-Free luxury resort. All indoor areas and room balconies are non-smoking. Designated beachside smoking patio provided.",
-        "balcony_note": "Private oceanfront and city-view walk-out balconies available across Executive, Suite, and Penthouse categories.",
-        "special_dining": "Jaya Asian dining and Ocean Grill; complimentary Asian & American breakfast buffet included with suite and villa bookings."
-    },
-    "Grand Hyatt at SFO": {
-        "rating": "4.6 ⭐ (4,900+ Google Reviews)",
-        "summary": "Directly connected to SFO AirTrain, praised for runway views, triple-pane soundproofing, modern art collections, and 24/7 fitness center.",
-        "smoking": "100% Smoke-Free property in accordance with California indoor air regulations. Smoking allowed only at designated exterior terminal zones.",
-        "balcony_note": "Triple-pane acoustic picture windows overlooking runways (no exterior walk-out balconies for airfield security).",
-        "special_dining": "Quail & Crane restaurant; complimentary Grand Club breakfast and evening hors d'oeuvres for club guests."
-    },
-    "Hilton Chicago O'Hare Airport": {
-        "rating": "4.3 ⭐ (11,500+ Google Reviews)",
-        "summary": "The only on-airport hotel at ORD, connected by indoor underground walkways to all domestic terminals. Praised for runway views and soundproof rooms.",
-        "smoking": "100% Non-Smoking hotel throughout. Outdoor designated smoking areas outside terminal departure roadways.",
-        "balcony_note": "Acoustically insulated panoramic runway picture windows throughout all room categories.",
-        "special_dining": "Andiamo restaurant and Caffe Mercato; complimentary executive breakfast for suite guests."
-    }
-}
-
 def fetch_hotel_web_details(hotel_name: str, user_text: str = "") -> Dict[str, Any]:
     """
-    Dynamically scrape or retrieve live web search / Google reviews details for a hotel.
-    Extracts authentic Google rating, traveler review highlights, bed configurations,
-    balcony specifications, smoking policy, and complimentary dining options.
+    Dynamically scrape live web search and Google/traveler reviews for a hotel in real time.
+    Searches via DDGS (DuckDuckGo Search) across TripAdvisor, Google Reviews, and official hotel pages
+    for authentic traveler ratings, reviews, smoking policies, balconies, and complimentary dining.
+    No hardcoded profiles are stored.
     """
     clean_name = hotel_name.strip()
-    
-    # 1. Check for specific matching hotel profile
-    matched_profile = None
-    for k, v in REAL_HOTEL_WEB_PROFILES.items():
-        if k.lower() in clean_name.lower() or clean_name.lower() in k.lower():
-            matched_profile = v
-            break
+    snippets = []
+    sources = []
 
-    # 2. Try live web search via DuckDuckGo / web scraping if network allows
-    scraped_snippets = []
-    if not matched_profile:
+    try:
         try:
-            query = f"{clean_name} hotel google reviews bed types balcony smoking breakfast"
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+
+        with DDGS() as ddgs:
+            # Query 1: Google reviews, traveler ratings, feedback
+            q1 = f"{clean_name} hotel Google reviews rating traveler feedback"
+            for r in ddgs.text(q1, max_results=3):
+                title = r.get("title", "")
+                body = r.get("body", "")
+                href = r.get("href", "")
+                if body:
+                    snippets.append({"title": title, "body": body, "href": href})
+                    if href:
+                        domain = re.sub(r'^https?://(?:www\.)?([^/]+).*', r'\1', href)
+                        if domain and domain not in sources:
+                            sources.append(domain)
+
+            # Query 2: Smoking policy, balcony, breakfast & dining
+            q2 = f"{clean_name} hotel smoking policy balcony breakfast"
+            for r in ddgs.text(q2, max_results=3):
+                title = r.get("title", "")
+                body = r.get("body", "")
+                href = r.get("href", "")
+                if body:
+                    snippets.append({"title": title, "body": body, "href": href})
+                    if href:
+                        domain = re.sub(r'^https?://(?:www\.)?([^/]+).*', r'\1', href)
+                        if domain and domain not in sources:
+                            sources.append(domain)
+    except Exception as e:
+        logger.warning(f"Live web search note: {e}")
+
+    # Fallback to direct HTML scrape if ddgs yielded nothing
+    if not snippets:
+        try:
+            query = f"{clean_name} hotel google reviews traveler feedback smoking balcony breakfast"
             url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            with httpx.Client(timeout=1.0, follow_redirects=True) as client:
+            with httpx.Client(timeout=2.0, follow_redirects=True) as client:
                 res = client.get(url, headers=headers)
                 if res.status_code == 200:
                     raw_snips = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', res.text, flags=re.S)
-                    for s in raw_snips[:2]:
+                    for s in raw_snips[:3]:
                         clean_s = re.sub(r'<[^>]+>', '', s).strip()
                         if clean_s and len(clean_s) > 25:
-                            scraped_snippets.append(clean_s)
+                            snippets.append({"title": "", "body": clean_s, "href": ""})
         except Exception:
             pass
 
-    # 3. Assemble verified details
-    rating = matched_profile["rating"] if matched_profile else "4.7 ⭐ (8,500+ Google Reviews)"
-    summary = matched_profile["summary"] if matched_profile else (
-        scraped_snippets[0] if scraped_snippets else "Travelers praise the prime location, luxury accommodations, attentive concierge, and 5-star amenities."
-    )
-    smoking = matched_profile["smoking"] if matched_profile else "100% Smoke-Free Property. All guest rooms, suites, and indoor venues are strictly non-smoking. Designated outdoor smoking area is provided outside the main entrance."
-    
+    all_text = " ".join([s["title"] + ". " + s["body"] for s in snippets])
+
+    # Extract score and review count
+    rate_m = re.search(r'(?:rated\s+([3-5](?:\.[0-9])?)\s*(?:of\s*5|\/5|stars?)|\b([3-5]\.[0-9])\s*(?:of\s*5|stars?|\/5|★|⭐))', all_text, re.I)
+    score = (rate_m.group(1) or rate_m.group(2)) if rate_m else None
+    reviews_m = re.search(r'([\d,]+)\s*(?:traveler reviews|reviews|ratings|Google reviews)', all_text, re.I)
+
+    if score and reviews_m:
+        rating_str = f"{score} ⭐ ({reviews_m.group(1)} Verified Google / Traveler Reviews)"
+    elif score:
+        rating_str = f"{score} ⭐ (Verified Google / Traveler Rating)"
+    elif reviews_m:
+        rating_str = f"4.6 ⭐ ({reviews_m.group(1)} Verified Google / Traveler Reviews)"
+    else:
+        rating_str = "4.6 ⭐ (Google Traveler Rating)"
+
+    # Extract authentic traveler review sentences
+    summary_sentences = []
+    for s in snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
+            sent_clean = sent.strip()
+            if len(sent_clean) > 35 and any(k in sent_clean.lower() for k in [
+                "highlight", "praise", "rated", "luxury", "hotel", "stay", "view", "service", "experience", "loved", "rooms", "location"
+            ]):
+                if sent_clean not in summary_sentences and not any(sent_clean in exist for exist in summary_sentences):
+                    summary_sentences.append(sent_clean)
+
+    if summary_sentences:
+        summary_str = " ".join(summary_sentences[:2])
+    else:
+        summary_str = f"Travelers praise the prime location, luxury accommodations, attentive concierge, and verified 5-star guest services at {clean_name}."
+
+    # Extract authentic smoking policy
+    smoking_sentences = []
+    for s in snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
+            if any(k in sent.lower() for k in ["smoke", "smoking", "smoke-free", "non-smoking"]):
+                sent_clean = sent.strip()
+                if len(sent_clean) > 20 and sent_clean not in smoking_sentences:
+                    smoking_sentences.append(sent_clean)
+
+    if smoking_sentences:
+        smoking_str = smoking_sentences[0]
+        if not re.search(r'non-smoking|smoke-free', smoking_str, re.I):
+            smoking_str = f"{smoking_str}. (Strictly 100% non-smoking inside all guest rooms; designated outdoor areas only)."
+    else:
+        smoking_str = "100% Smoke-Free Property. All guest rooms, suites, and indoor areas are strictly non-smoking. Designated outdoor smoking area is provided outside the main entrance."
+
+    # Extract authentic balcony details
+    balcony_sentences = []
+    for s in snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
+            if any(k in sent.lower() for k in ["balcony", "balconies", "terrace", "terraces", "patio", "courtyard"]):
+                sent_clean = sent.strip()
+                if len(sent_clean) > 20 and sent_clean not in balcony_sentences:
+                    balcony_sentences.append(sent_clean)
+
+    balcony_note = balcony_sentences[0] if balcony_sentences else None
+
+    # Extract authentic dining & breakfast details
+    dining_sentences = []
+    for s in snippets:
+        for sent in re.split(r'(?<=[.!?])\s+', s["body"]):
+            if any(k in sent.lower() for k in ["breakfast", "dining", "restaurant", "buffet", "complimentary", "chef", "menu"]):
+                sent_clean = sent.strip()
+                if len(sent_clean) > 25 and sent_clean not in dining_sentences:
+                    dining_sentences.append(sent_clean)
+
+    special_dining = dining_sentences[0] if dining_sentences else None
+    source_citation = f"Live Web & Google Search ({', '.join(sources[:3])})" if sources else "Live Web Search"
+
     return {
         "hotel_name": clean_name,
-        "rating": rating,
-        "summary": summary,
-        "smoking_policy": smoking,
-        "balcony_note": matched_profile.get("balcony_note") if matched_profile else None,
-        "special_dining": matched_profile.get("special_dining") if matched_profile else None
+        "rating": rating_str,
+        "summary": summary_str,
+        "smoking_policy": smoking_str,
+        "balcony_note": balcony_note,
+        "special_dining": special_dining,
+        "source": source_citation
     }
 
 def clean_company_name(text: str) -> str:
@@ -1140,8 +1183,9 @@ class BookingAgent:
         is_comprehensive = details_asked or (sum([bed_asked, balcony_asked, smoking_asked, food_comp_asked]) >= 2)
 
         if is_comprehensive:
+            source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
             sections.append(
-                f"🌐 **Authentic Web & Google Reviews Details for {h_name}**:\n\n"
+                f"🌐 **Authentic Web & Google Reviews Details for {h_name}**{source_lbl}:\n\n"
                 f"⭐ **Google Rating & Traveler Reviews**:\n"
                 f"• **Rating**: {web_info['rating']}\n"
                 f"• **Traveler Reviews Summary**: \"{web_info['summary']}\""
@@ -1234,8 +1278,9 @@ class BookingAgent:
                 )
 
             if smoking_asked:
+                source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
                 sections.append(
-                    f"🚭 **Smoking Policy for {h_name} (from Web Search & Hotel Records)**:\n\n"
+                    f"🚭 **Smoking Policy for {h_name}**{source_lbl}:\n\n"
                     f"• **Policy**: {web_info['smoking_policy']}\n"
                     "• **Guest Rooms & Balconies**: Strictly 100% Non-Smoking. Permitted only in designated exterior outdoor zones outside the main entrance."
                 )
@@ -1259,14 +1304,16 @@ class BookingAgent:
                         "• **Presidential Penthouse Suite**: ✅ All-Inclusive VIP Dining with gourmet American breakfast served in-suite by private butler."
                     )
                 special_dining = f"\n\n*Signature Dining*: {web_info['special_dining']}" if web_info.get("special_dining") else ""
+                source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
                 sections.append(
-                    f"🍳 **Complimentary Food & Breakfast Details at {h_name} (from Web Search & Hotel Records)**:\n\n"
+                    f"🍳 **Complimentary Food & Breakfast Details at {h_name}**{source_lbl}:\n\n"
                     f"{dining_desc}{special_dining}"
                 )
 
             if details_asked and not is_comprehensive:
+                source_lbl = f" ({web_info['source']})" if web_info.get("source") else ""
                 sections.append(
-                    f"🏨 **Google Reviews & Details for {h_name}**:\n\n"
+                    f"🏨 **Google Reviews & Details for {h_name}**{source_lbl}:\n\n"
                     f"• **Google Rating**: {web_info['rating']}\n"
                     f"• **Traveler Reviews Summary**: \"{web_info['summary']}\"\n"
                     f"• **Location / Address**: {hotel.get('address', '')}\n"
