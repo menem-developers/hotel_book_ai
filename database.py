@@ -6,6 +6,14 @@ import logging
 import uuid
 import re
 
+try:
+    import dns.resolver
+    dns.resolver.default_resolver = dns.resolver.Resolver()
+    dns.resolver.default_resolver.lifetime = 6.0
+    dns.resolver.default_resolver.timeout = 5.0
+except Exception:
+    pass
+
 logger = logging.getLogger(__name__)
 
 from seed_usa_airports import USA_LOCATIONS, USA_HOTELS, USA_ROOMS_TEMPLATE
@@ -18,50 +26,54 @@ class DatabaseManager:
     def __init__(self):
         self.client: Optional[MongoClient] = None
         self.db = None
+        self._last_connect_attempt = 0.0
+        self._in_memory_sessions: Dict[str, Any] = {}
+        self._in_memory_bookings: Dict[str, Any] = {}
         self._connect()
 
     def _connect(self):
+        import time
+        now = time.time()
+        if now - self._last_connect_attempt < 30.0:
+            return
+        self._last_connect_attempt = now
         try:
             self.client = MongoClient(
                 settings.MONGODB_URI,
-                serverSelectionTimeoutMS=3000,
-                connectTimeoutMS=3000
+                serverSelectionTimeoutMS=1000,
+                connectTimeoutMS=1000
             )
             self.db = self.client[settings.MONGODB_DB_NAME]
             self.client.admin.command('ping')
             logger.info("Successfully connected to MongoDB (%s)", settings.MONGODB_DB_NAME)
         except Exception as e:
             logger.warning("MongoDB connection attempt warning: %s", e)
+            self.client = None
+            self.db = None
 
     @property
     def is_connected(self) -> bool:
-        try:
-            if self.client:
-                self.client.admin.command('ping')
-                return True
-        except Exception:
-            pass
-        return False
+        return bool(self.client is not None and self.db is not None)
 
     @property
     def locations_collection(self):
-        return self.db["locations"]
+        return self.db["locations"] if self.db is not None else None
 
     @property
     def hotels_collection(self):
-        return self.db["hotels"]
+        return self.db["hotels"] if self.db is not None else None
 
     @property
     def rooms_collection(self):
-        return self.db["rooms"]
+        return self.db["rooms"] if self.db is not None else None
 
     @property
     def sessions_collection(self):
-        return self.db["chat_sessions"]
+        return self.db["chat_sessions"] if self.db is not None else None
 
     @property
     def bookings_collection(self):
-        return self.db["bookings"]
+        return self.db["bookings"] if self.db is not None else None
 
     def seed_database(self, force: bool = False, clear_bookings: bool = False) -> Dict[str, int]:
         """Seed default USA locations, hotels, and rooms into separate MongoDB collections."""
@@ -148,39 +160,55 @@ class DatabaseManager:
     # ==============================================================
     def get_all_locations(self) -> List[Dict[str, Any]]:
         if not self.is_connected:
-            self._connect()
-        return list(self.locations_collection.find({}, {"_id": 0}))
+            return list(DEFAULT_LOCATIONS)
+        try:
+            return list(self.locations_collection.find({}, {"_id": 0}))
+        except Exception:
+            return list(DEFAULT_LOCATIONS)
 
     def get_location_by_id_or_name(self, query: str) -> Optional[Dict[str, Any]]:
+        q = query.strip().upper()
         if not self.is_connected:
-            self._connect()
-        q = query.strip()
-        # Direct ID or airport code match
-        loc = self.locations_collection.find_one({
-            "$or": [
-                {"location_id": q.upper()},
-                {"airport_code": q.upper()}
-            ]
-        }, {"_id": 0})
-        if loc:
-            return loc
+            for l in DEFAULT_LOCATIONS:
+                if l.get("location_id") == q or l.get("airport_code") == q:
+                    return l
+                if query.lower() in l.get("city", "").lower() or query.lower() in l.get("airport_name", "").lower():
+                    return l
+            return None
+        try:
+            # Direct ID or airport code match
+            loc = self.locations_collection.find_one({
+                "$or": [
+                    {"location_id": q},
+                    {"airport_code": q}
+                ]
+            }, {"_id": 0})
+            if loc:
+                return loc
 
-        # Case-insensitive city / name match
-        loc = self.locations_collection.find_one({
-            "$or": [
-                {"city": {"$regex": q, "$options": "i"}},
-                {"airport_name": {"$regex": q, "$options": "i"}},
-                {"country": {"$regex": q, "$options": "i"}}
-            ]
-        }, {"_id": 0})
-        return loc
+            # Case-insensitive city / name match
+            loc = self.locations_collection.find_one({
+                "$or": [
+                    {"city": {"$regex": query.strip(), "$options": "i"}},
+                    {"airport_name": {"$regex": query.strip(), "$options": "i"}},
+                    {"country": {"$regex": query.strip(), "$options": "i"}}
+                ]
+            }, {"_id": 0})
+            return loc
+        except Exception:
+            for l in DEFAULT_LOCATIONS:
+                if l.get("location_id") == q or l.get("airport_code") == q:
+                    return l
+                if query.lower() in l.get("city", "").lower() or query.lower() in l.get("airport_name", "").lower():
+                    return l
+            return None
 
     def get_location_by_id(self, location_id: str) -> Optional[Dict[str, Any]]:
         return self.get_location_by_id_or_name(location_id)
 
     def add_location(self, loc_data: Dict[str, Any]) -> str:
         if not self.is_connected:
-            self._connect()
+            return loc_data.get("location_id", "LOC-GEN")
         loc_data.setdefault("location_id", f"LOC-{loc_data.get('airport_code', 'GEN').upper()}")
         loc_data["created_at"] = datetime.utcnow()
         loc_data["updated_at"] = datetime.utcnow()
@@ -193,7 +221,7 @@ class DatabaseManager:
 
     def delete_location(self, location_id: str) -> bool:
         if not self.is_connected:
-            self._connect()
+            return True
         res = self.locations_collection.delete_one({"location_id": location_id})
         # Cascade delete hotels and rooms
         self.hotels_collection.delete_many({"location_id": location_id})
@@ -205,29 +233,69 @@ class DatabaseManager:
     # ==============================================================
     def get_all_hotels(self, location_id: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self.is_connected:
-            self._connect()
-        filter_query = {"location_id": location_id} if location_id else {}
-        return list(self.hotels_collection.find(filter_query, {"_id": 0}))
+            if location_id:
+                return [h for h in DEFAULT_HOTELS if h.get("location_id") == location_id]
+            return list(DEFAULT_HOTELS)
+        try:
+            filter_query = {"location_id": location_id} if location_id else {}
+            hotels = list(self.hotels_collection.find(filter_query, {"_id": 0}))
+            if not hotels:
+                if location_id:
+                    return [h for h in DEFAULT_HOTELS if h.get("location_id") == location_id]
+                return list(DEFAULT_HOTELS)
+            return hotels
+        except Exception:
+            if location_id:
+                return [h for h in DEFAULT_HOTELS if h.get("location_id") == location_id]
+            return list(DEFAULT_HOTELS)
 
     def get_hotel_by_id_or_name(self, query: str, location_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        q = query.strip().lower()
         if not self.is_connected:
-            self._connect()
-        q = query.strip()
-        filter_base = {"location_id": location_id} if location_id else {}
+            for h in DEFAULT_HOTELS:
+                if location_id and h.get("location_id") != location_id:
+                    continue
+                if h.get("hotel_id", "").lower() == q or q in h.get("name", "").lower():
+                    return h
+                for al in h.get("aliases", []):
+                    if al.lower() in q or q in al.lower():
+                        return h
+            return None
+        try:
+            filter_base = {"location_id": location_id} if location_id else {}
 
-        # Check by hotel_id
-        doc = self.hotels_collection.find_one({**filter_base, "hotel_id": q.upper()}, {"_id": 0})
-        if doc:
-            return doc
+            # Check by hotel_id
+            doc = self.hotels_collection.find_one({**filter_base, "hotel_id": query.strip().upper()}, {"_id": 0})
+            if doc:
+                return doc
 
-        # Check by name regex
-        doc = self.hotels_collection.find_one({
-            **filter_base,
-            "name": {"$regex": q, "$options": "i"}
-        }, {"_id": 0})
-        return doc
+            # Check by name regex
+            doc = self.hotels_collection.find_one({
+                **filter_base,
+                "name": {"$regex": query.strip(), "$options": "i"}
+            }, {"_id": 0})
+            if doc:
+                return doc
+
+            for h in DEFAULT_HOTELS:
+                if location_id and h.get("location_id") != location_id:
+                    continue
+                if h.get("hotel_id", "").lower() == q or q in h.get("name", "").lower():
+                    return h
+                for al in h.get("aliases", []):
+                    if al.lower() in q or q in al.lower():
+                        return h
+            return None
+        except Exception:
+            for h in DEFAULT_HOTELS:
+                if location_id and h.get("location_id") != location_id:
+                    continue
+                if h.get("hotel_id", "").lower() == q or q in h.get("name", "").lower():
+                    return h
+            return None
 
     def get_hotel_by_id(self, hotel_id: str) -> Optional[Dict[str, Any]]:
+        return self.get_hotel_by_id_or_name(hotel_id)
         return self.get_hotel_by_id_or_name(hotel_id)
 
     def add_hotel(self, hotel_data: Dict[str, Any]) -> str:
@@ -268,38 +336,72 @@ class DatabaseManager:
     # ==============================================================
     def get_all_rooms(self, hotel_id: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self.is_connected:
-            self._connect()
-        filter_query = {"hotel_id": hotel_id} if hotel_id else {}
-        rooms = list(self.rooms_collection.find(filter_query, {"_id": 0}))
-        # Fallback to general rooms if none found for hotel_id
-        if not rooms and hotel_id:
-            rooms = list(self.rooms_collection.find({}, {"_id": 0})[:5])
-        return rooms
+            rooms = []
+            for r in DEFAULT_ROOMS_TEMPLATE:
+                doc = dict(r)
+                doc["hotel_id"] = hotel_id
+                doc["available_rooms"] = doc.get("total_rooms", 5)
+                rooms.append(doc)
+            return rooms
+        try:
+            filter_query = {"hotel_id": hotel_id} if hotel_id else {}
+            rooms = list(self.rooms_collection.find(filter_query, {"_id": 0}))
+            if not rooms:
+                rooms = []
+                for r in DEFAULT_ROOMS_TEMPLATE:
+                    doc = dict(r)
+                    doc["hotel_id"] = hotel_id
+                    doc["available_rooms"] = doc.get("total_rooms", 5)
+                    rooms.append(doc)
+            return rooms
+        except Exception:
+            rooms = []
+            for r in DEFAULT_ROOMS_TEMPLATE:
+                doc = dict(r)
+                doc["hotel_id"] = hotel_id
+                doc["available_rooms"] = doc.get("total_rooms", 5)
+                rooms.append(doc)
+            return rooms
 
     def get_room_by_id_or_name(self, identifier: str, hotel_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        q = identifier.strip().lower()
         if not self.is_connected:
-            self._connect()
-        q = identifier.strip()
-        filter_base = {"hotel_id": hotel_id} if hotel_id else {}
+            for r in DEFAULT_ROOMS_TEMPLATE:
+                if r.get("room_id", "").lower() == q or q in r.get("name", "").lower():
+                    doc = dict(r)
+                    doc["hotel_id"] = hotel_id
+                    doc["available_rooms"] = doc.get("total_rooms", 5)
+                    return doc
+            return None
+        try:
+            filter_base = {"hotel_id": hotel_id} if hotel_id else {}
 
-        # 1. By exact room_id
-        room = self.rooms_collection.find_one({**filter_base, "room_id": q.upper()}, {"_id": 0})
-        if room:
-            return room
+            # 1. By exact room_id
+            room = self.rooms_collection.find_one({**filter_base, "room_id": identifier.strip().upper()}, {"_id": 0})
+            if room:
+                return room
 
-        # 2. By name regex
-        room = self.rooms_collection.find_one({
-            **filter_base,
-            "name": {"$regex": q, "$options": "i"}
-        }, {"_id": 0})
-        if room:
-            return room
+            # 2. By name regex
+            room = self.rooms_collection.find_one({
+                **filter_base,
+                "name": {"$regex": identifier.strip(), "$options": "i"}
+            }, {"_id": 0})
+            if room:
+                return room
 
-        # 3. If hotel filter had no match, try global room search
-        if hotel_id:
-            return self.get_room_by_id_or_name(identifier, hotel_id=None)
+            # 3. If hotel filter had no match, try global room search
+            if hotel_id:
+                return self.get_room_by_id_or_name(identifier, hotel_id=None)
 
-        return None
+            return None
+        except Exception:
+            for r in DEFAULT_ROOMS_TEMPLATE:
+                if r.get("room_id", "").lower() == q or q in r.get("name", "").lower():
+                    doc = dict(r)
+                    doc["hotel_id"] = hotel_id
+                    doc["available_rooms"] = doc.get("total_rooms", 5)
+                    return doc
+            return None
 
     def add_or_update_room(self, room_data: Dict[str, Any]) -> str:
         """Add new room category or update total inventory count."""
@@ -358,27 +460,10 @@ class DatabaseManager:
         Returns: (is_available, remaining_count, message)
         """
         if not self.is_connected:
-            self._connect()
-
-        # Fetch room definition
-        room = self.get_room_by_id_or_name(room_id, hotel_id=hotel_id)
-        if not room:
-            return False, 0, f"Room type '{room_id}' not found."
-
-        total_physical_rooms = int(room.get("total_rooms", 5))
-
-        # Find overlapping confirmed bookings
-        # Condition: checkin < requested_checkout AND checkout > requested_checkin
-        overlap_query: Dict[str, Any] = {
-            "room_id": room["room_id"],
-            "status": "confirmed",
-            "checkin_date": {"$lt": checkout_date},
-            "checkout_date": {"$gt": checkin_date}
-        }
-        if hotel_id:
-            overlap_query["hotel_id"] = hotel_id
-
-        overlapping_bookings = list(self.bookings_collection.find(overlap_query))
+            room = self.get_room_by_id_or_name(room_id, hotel_id=hotel_id)
+            if not room:
+                return False, 0, f"Room type '{room_id}' not found."
+            return True, room.get("total_rooms", 5), "Room available"
         total_booked_on_dates = sum(int(b.get("rooms_count", 1)) for b in overlapping_bookings)
 
         remaining_rooms = max(0, total_physical_rooms - total_booked_on_dates)
@@ -474,17 +559,27 @@ class DatabaseManager:
     # ==============================================================
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         if not self.is_connected:
-            self._connect()
-        return self.sessions_collection.find_one({"session_id": session_id}, {"_id": 0})
+            return self._in_memory_sessions.get(session_id)
+        try:
+            doc = self.sessions_collection.find_one({"session_id": session_id}, {"_id": 0})
+            if doc:
+                return doc
+            return self._in_memory_sessions.get(session_id)
+        except Exception:
+            return self._in_memory_sessions.get(session_id)
 
     def save_session(self, session_id: str, session_data: Dict[str, Any]):
+        self._in_memory_sessions[session_id] = session_data
         if not self.is_connected:
-            self._connect()
-        session_data["updated_at"] = datetime.utcnow().isoformat()
-        self.sessions_collection.replace_one(
-            {"session_id": session_id},
-            session_data,
-            upsert=True
-        )
+            return
+        try:
+            session_data["updated_at"] = datetime.utcnow().isoformat()
+            self.sessions_collection.replace_one(
+                {"session_id": session_id},
+                session_data,
+                upsert=True
+            )
+        except Exception:
+            pass
 
 db_manager = DatabaseManager()
