@@ -51,8 +51,20 @@ DISALLOWED_NAMES = {
     "founder", "ceo", "co-founder", "director", "manager", "executive", "admin", "owner",
     "president", "vp", "employee", "staff", "guest", "client", "customer",
     "coming sunday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
-    "deluxe", "executive", "suite", "villa", "single", "double", "penthouse"
+    "deluxe", "executive", "suite", "villa", "single", "double", "penthouse",
+    "which", "is", "best", "better", "good", "great", "nice", "top", "cheapest", "cheaper",
+    "expensive", "what", "where", "how", "who", "why", "when", "can", "could", "would", "should",
+    "recommend", "recommendation", "recommends", "suggest", "suggestion", "suggests", "advice",
+    "help", "decide", "tell", "show", "give", "list", "compare", "comparison", "difference",
+    "details", "detail", "info", "information", "price", "pricing", "rate", "rates", "cost",
+    "available", "availability", "option", "options", "choice", "choices", "type", "types",
+    "bed", "beds", "balcony", "smoking", "smoke", "food", "breakfast", "dining", "wifi",
+    "view", "views", "city", "airport", "terminal", "service", "services", "amenities", "facilities",
+    "one", "two", "three", "four", "five", "first", "second", "third", "fourth", "fifth", "me", "you",
+    "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or", "but", "with"
 }
+
+NON_NAME_WORDS = DISALLOWED_NAMES
 
 DISALLOWED_COMPANIES = {
     "yes", "no", "ok", "okay", "sure", "yep", "yeah", "nope", "hi", "hello",
@@ -247,6 +259,14 @@ def is_inquiring_about_booking(text: str, has_active_booking: bool = False) -> b
     ]
     if any(re.search(p, t) for p in edit_patterns):
         return False
+
+    # 0.1 Check if this is a recommendation or details inquiry - NEVER treat as booking lookup!
+    if any(k in t for k in ["best", "recommend", "suggest", "advice", "better", "cheapest", "expensive", "options", "which is best", "whichy is best", "which room is best", "whichy room is best", "which hotel is best"]):
+        return False
+    if any(k in t for k in ["balcony", "smoke", "smoking", "complimentary", "breakfast", "google review", "reviews"]):
+        return False
+    if re.search(r'\b(types?\s+(?:of\s+)?rooms?|room\s+types?|what\s+(?:are\s+the\s+)?rooms?|available\s+rooms?|room\s+options)\b', t):
+        return False
     
     # 1. Direct booking reference regex (e.g. BK-AC9EF9)
     if re.search(r"\bbk-[a-z0-9]{4,8}\b", t):
@@ -257,32 +277,37 @@ def is_inquiring_about_booking(text: str, has_active_booking: bool = False) -> b
         "booking details", "my booking", "reservation details", "my reservation",
         "show booking", "check booking", "check my booking", "status of booking",
         "booking status", "what is my booking", "find my booking", "view booking",
-        "booked hotel", "my reserved", "reservation info", "show my booking", "view my booking"
+        "booked hotel", "my reserved", "reservation info", "show my booking", "view my booking",
+        "retrieve booking", "retrieve reservation", "lookup booking"
     ]
     if any(k in t for k in booking_keywords):
         return True
 
-    # 3. Specific questions about stay details (checkin, hotel, room, checkout, vehicle, dates)
-    specific_phrases = [
-        "when my checkin", "when is my checkin", "when is checkin", "when is check-in", "checkin date", "check-in date",
-        "which hotel", "what hotel", "where am i staying", "where is the hotel", "hotel address", "hotel location",
-        "when is checkout", "when is check-out", "how many nights", "checkout date", "check-out date",
-        "which room", "what room", "room type", "how many rooms", "what room did i book",
-        "is pickup", "airport pickup", "airport drop", "do i have vehicle", "pickup vehicle", "transfer status", "chauffeur",
-        "how much did i pay", "total amount", "total price", "booking reference", "booking id"
-    ]
-    if any(k in t for k in specific_phrases):
-        return True
-
-    # 4. If the session already has an active confirmed booking, be broad to catch natural conversational queries
+    # 3. Specific questions about stay details (requiring active booking or 'did i' / 'my')
     if has_active_booking:
+        active_phrases = [
+            "which hotel", "what hotel", "where am i staying", "where is the hotel", "hotel address", "hotel location",
+            "when is checkin", "when is check-in", "when my checkin", "when is checkout", "when is check-out",
+            "which room", "what room", "room type", "how many rooms",
+            "is pickup", "airport pickup", "airport drop", "do i have vehicle", "pickup vehicle", "transfer status", "chauffeur",
+            "how much did i pay", "total amount", "total price", "booking reference", "booking id"
+        ]
+        if any(k in t for k in active_phrases):
+            return True
         question_words = ["when", "which", "where", "what", "how", "is", "do", "tell", "show", "can you"]
         booking_subjects = ["checkin", "check-in", "checkout", "check-out", "hotel", "room", "stay", "pickup", "drop", "transfer", "price", "cost", "dates", "arrival", "departure"]
         has_q = any(w in t.split() or w in t for w in question_words)
         has_s = any(w in t for w in booking_subjects)
         if has_q and has_s:
             return True
-        if any(w in t for w in ["checkin", "check-in", "which hotel", "my hotel", "what room", "my room", "my vehicle", "my car"]):
+    else:
+        booked_phrases = [
+            "which hotel did i book", "what hotel did i book", "where am i staying",
+            "which room did i book", "what room did i book", "did i book",
+            "my checkin", "when is my checkin", "my checkout", "when is my checkout",
+            "how much did i pay", "total amount i paid", "my booking reference", "my booking id"
+        ]
+        if any(k in t for k in booked_phrases):
             return True
 
     return False
@@ -1096,7 +1121,10 @@ class BookingAgent:
         smoking_asked = bool(re.search(r'\b(smoke|smoking|non-smoking|smoke-free|cigar|cigarette|vape|vaping)\b', t))
         food_comp_asked = bool(re.search(r'\b(complimentary food|free food|complimentary breakfast|free breakfast|breakfast included|is breakfast free|is food free|is food complimentary|food complimentary|food complementarty|is breakfast complimentary|dining complimentary|complimentary dining|free meals?|is food included|is breakfast included)\b', t) or
                                (re.search(r'\b(food|breakfast|dining|meals?)\b', t) and re.search(r'\b(free|complimentary|complementary|included)\b', t)))
-        rooms_asked = bool(re.search(r'\b(types?\s+of\s+rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+of\s+room|room\s+details?)\b', t))
+        rooms_asked = bool(re.search(
+            r'\b(types?\s+(?:of\s+)?rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+(?:of\s+)?rooms?|room\s+details?|tell\s+me\s+room\s+details)\b',
+            t
+        ) or (re.search(r'\b(room|rooms)\b', t) and re.search(r'\b(type|types|category|categories|options|available|details|list|show)\b', t)))
         details_asked = bool(re.search(r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel|amenities|facilities|services|features|overview)\b', t) or
                              re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for|what\s+about)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
 
@@ -1351,9 +1379,9 @@ class BookingAgent:
                                (re.search(r'\b(food|breakfast|dining|meals?)\b', t) and re.search(r'\b(free|complimentary|complementary|included)\b', t)))
         
         rooms_asked = bool(re.search(
-            r'\b(types?\s+of\s+rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+of\s+room|room\s+details?)\b',
+            r'\b(types?\s+(?:of\s+)?rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+(?:of\s+)?rooms?|room\s+details?|tell\s+me\s+room\s+details)\b',
             t
-        ))
+        ) or (re.search(r'\b(room|rooms)\b', t) and re.search(r'\b(type|types|category|categories|options|available|details|list|show)\b', t)))
 
         details_asked = bool(re.search(
             r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel|amenities|facilities|services|features|overview)\b',
@@ -1401,6 +1429,163 @@ class BookingAgent:
 
         # 3. Hotel is identified -> fetch web details and build response
         return self.handle_hotel_web_details_inquiry(user_text, session, matched_hotel)
+
+    def check_recommendation_inquiry(self, user_text: str, session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Intelligently recommend hotels or rooms with actionable reasons,
+        preventing the agent from repeating generic prompts or capturing questions as names.
+        """
+        t = user_text.lower().strip()
+
+        is_rec = bool(re.search(
+            r'\b(which\s*(?:y)?\s*(?:is|are)?\s*(?:the\s*)?best|which\s+one\s+is\s+best|which\s+(?:is|are)\s+better|which\s+(?:hotel|room)s?\s+(?:is|are)?\s*best|best\s+(?:hotel|room|option|rooms|hotels|options|choice|choices)|what\s+(?:is|are)?\s*best|what\s+do\s+you\s+recommend|recommend\s+(?:a\s+)?(?:hotel|room)?|recommendation|what\s+do\s+you\s+suggest|suggest\s+(?:a\s+)?(?:hotel|room)?|suggestion|your\s+recommendation|your\s+suggestion|help\s+me\s+(?:choose|decide|pick)|what\s+should\s+i\s+(?:choose|pick|book)|which\s+one\s+should\s+i|any\s+suggestion|any\s+recommendation|which\s+to\s+choose|which\s+to\s+pick|whichy\s+room\s+is\s+best)\b',
+            t
+        ))
+        if not is_rec:
+            return None
+
+        asking_room = bool(re.search(r'\b(room|rooms|suite|suites|villa|villas|bed|beds)\b', t))
+        asking_hotel = bool(re.search(r'\b(hotel|hotels|property|properties|place|resort)\b', t))
+
+        curr_step = session.get("current_step")
+        if not asking_room and not asking_hotel:
+            if session.get("hotel_id") or curr_step in [
+                STEP_ASK_ROOM_TYPE, STEP_ASK_ROOMS_COUNT, STEP_ASK_TYPE_AND_NAME,
+                STEP_ASK_COMPANY_NAME, STEP_ASK_MEMBERS_COUNT, STEP_ASK_CHECKIN_DATE
+            ]:
+                asking_room = True
+            elif curr_step in [STEP_ASK_HOTEL, STEP_START, STEP_ASK_LOCATION]:
+                asking_hotel = True
+
+        # CASE 1: ROOM RECOMMENDATION
+        if asking_room:
+            matched_hotel = None
+            cand, match_type, _ = check_hotel_match_with_fuzzy(user_text, location_id=session.get("location_id"))
+            if cand and match_type == "exact":
+                matched_hotel = cand
+            if not matched_hotel and (session.get("hotel_id") or session.get("hotel_name")):
+                h_id = session.get("hotel_id") or session.get("hotel_name")
+                matched_hotel = db_manager.get_hotel_by_id_or_name(h_id)
+
+            if not matched_hotel:
+                city = session.get("location_city")
+                loc_id = session.get("location_id")
+                hotels_list = db_manager.get_all_hotels(location_id=loc_id) if loc_id else db_manager.get_all_hotels()[:5]
+                hotel_names = [h["name"] for h in hotels_list[:5]]
+                dest_hint = f" in **{city}**" if city else ""
+                reply = (
+                    f"I would be glad to give you my expert room recommendations!\n\n"
+                    f"**Which hotel{dest_hint} would you like me to recommend rooms for?**\n"
+                    f"Please select or tell me the hotel name:"
+                )
+                return {
+                    "reply": reply,
+                    "quick_replies": hotel_names
+                }
+
+            h_name = matched_hotel.get("name", "our partner hotel")
+            guest_type = session.get("guest_type", "individual")
+            comp_name = session.get("company_name")
+            total_members = int(session.get("total_members") or 1)
+            rooms_cnt = int(session.get("rooms_count") or 1)
+
+            is_corporate = (guest_type == "company" or bool(comp_name) or any(k in t for k in ["company", "corporate", "business", "work", "team"]))
+            target_entity = f"**{comp_name}**" if comp_name else ("your company" if is_corporate else "your stay")
+
+            lines = [f"🌟 **Expert Room Recommendations for {target_entity} at {h_name}**:"]
+
+            if is_corporate:
+                lines.append(
+                    f"💼 **1. Corporate Business Suite ($350/night) — Top Corporate Pick**\n"
+                    f"• **Why it's best for you**: Specifically tailored for corporate travelers and business delegations! It includes a dedicated executive workstation with high-speed fiber internet, an integrated meeting lounge, private skyline balcony, and **complimentary daily Executive Club Breakfast Buffet & evening cocktail reception**—saving breakfast and meeting venue expenses for your company."
+                )
+                lines.append(
+                    f"⭐ **2. Executive Double Room ($220/night) — Best Value & Comfort**\n"
+                    f"• **Why it's best for you**: Outstanding luxury at an attractive rate. Features a choice of 1 King bed or 2 Queen beds, private furnished walk-out balcony, soundproof acoustic windows, and an Italian marble bathroom."
+                )
+                if total_members >= 3 or rooms_cnt >= 2:
+                    lines.append(
+                        f"👑 **3. Luxury Family & Team Villa ($520/night) — For Co-Working & Collaboration**\n"
+                        f"• **Why it's best for you**: 3 beds across multiple rooms with an expansive landscaped terrace balcony, living area, and complimentary daily gourmet family breakfast for all registered delegates."
+                    )
+                rec_replies = ["Corporate Business Suite", "Executive Double Room"]
+                followup = f"Which room type would you prefer to reserve for {target_entity}?"
+
+            elif total_members >= 3:
+                lines.append(
+                    f"🏡 **1. Luxury Family & Team Villa ($520/night) — Best for Groups of {total_members}**\n"
+                    f"• **Why it's best for you**: Specially designed for larger parties with 3 beds (1 California King + 2 Queen beds in separate bedrooms), expansive terrace balcony, spacious living room, and **complimentary gourmet family breakfast buffet daily**."
+                )
+                lines.append(
+                    f"👑 **2. Presidential Penthouse Suite ($850/night) — VIP Luxury**\n"
+                    f"• **Why it's best for you**: Accommodates up to 6 guests with wrap-around 360-degree terrace, private outdoor heated hydrotherapy jacuzzi, dedicated 24/7 butler, and full gourmet in-suite American breakfast."
+                )
+                lines.append(
+                    f"⭐ **3. Executive Double Room ($220/night)** (or book multiple rooms):\n"
+                    f"• **Why it's best for you**: Ideal if guests prefer private separate rooms with individual walk-out balconies."
+                )
+                rec_replies = ["Luxury Family & Team Villa", "Presidential Penthouse Suite", "Executive Double Room"]
+                followup = f"Which room category would you prefer for your group?"
+
+            else:
+                lines.append(
+                    f"⭐ **1. Executive Double Room ($220/night) — Most Popular & Best Value**\n"
+                    f"• **Why it's best for you**: Offers the best balance of luxury and value. You get a private furnished walk-out balcony, plush king bed, Italian marble rain shower, and quiet soundproof windows."
+                )
+                lines.append(
+                    f"💻 **2. Deluxe Single Room ($145/night) — Economical Solo Travel**\n"
+                    f"• **Why it's best for you**: Tailored for solo travelers who want 5-star comfort on a budget. Includes a plush king bed, high-speed fiber Wi-Fi, and soundproof picture windows."
+                )
+                lines.append(
+                    f"💼 **3. Corporate Business Suite ($350/night) — Executive Comfort**\n"
+                    f"• **Why it's best for you**: Extra space with an integrated lounge, private skyline balcony, and **complimentary daily Executive Club breakfast buffet**."
+                )
+                rec_replies = ["Executive Double Room", "Deluxe Single Room", "Corporate Business Suite"]
+                followup = f"Which room type would you like to reserve for your stay at **{h_name}**?"
+
+            # Ensure hotel context is retained
+            session["hotel_id"] = matched_hotel["hotel_id"]
+            session["hotel_name"] = matched_hotel["name"]
+            session["hotel_address"] = matched_hotel.get("address", "")
+            if matched_hotel.get("location_id"):
+                session["location_id"] = matched_hotel["location_id"]
+
+            return {
+                "reply": "\n\n".join(lines) + f"\n\n{followup}",
+                "quick_replies": rec_replies
+            }
+
+        # CASE 2: HOTEL RECOMMENDATION
+        else:
+            loc_id = session.get("location_id")
+            cand_loc, _, _ = check_location_match_with_fuzzy(user_text)
+            if cand_loc:
+                loc_id = cand_loc["location_id"]
+                session["location_id"] = loc_id
+                session["location_city"] = cand_loc["city"]
+                session["airport_code"] = cand_loc["airport_code"]
+
+            city = session.get("location_city", "your destination")
+            hotels = db_manager.get_all_hotels(location_id=loc_id) if loc_id else db_manager.get_all_hotels()[:5]
+
+            lines = [f"🏨 **Top Hotel Recommendations in {city}**:"]
+            rec_hotel_names = []
+            for idx, h in enumerate(hotels[:4]):
+                h_n = h.get("name")
+                rec_hotel_names.append(h_n)
+                badge = h.get("badge", "5-Star Luxury")
+                desc = h.get("description", "")
+                rating = h.get("rating", 4.8)
+                lines.append(
+                    f"**{idx+1}. {h_n}** ({rating}⭐) — *{badge}*\n"
+                    f"• **Why it's best**: {desc[:140]}..."
+                )
+
+            followup = f"Which hotel in **{city}** would you like to choose?"
+            return {
+                "reply": "\n\n".join(lines) + f"\n\n{followup}",
+                "quick_replies": rec_hotel_names
+            }
 
     def detect_change_target(self, text: str) -> Optional[str]:
         """
@@ -2156,6 +2341,29 @@ class BookingAgent:
             }
 
         # ==============================================================
+        # 1.57 RECOMMENDATION & ADVISORY INTELLIGENCE INTERCEPT
+        # (Answers "which is best", "which room is best", "what do you recommend" with smart reasons)
+        # ==============================================================
+        rec_res = self.check_recommendation_inquiry(user_text, session)
+        if rec_res:
+            reply = rec_res["reply"]
+            quick_replies = rec_res["quick_replies"]
+            session.setdefault("messages", []).append({
+                "role": "assistant",
+                "content": reply,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            db_manager.save_session(session["session_id"], session)
+            return {
+                "session_id": session["session_id"],
+                "reply": reply,
+                "current_step": session.get("current_step"),
+                "state": session,
+                "quick_replies": quick_replies,
+                "booking": None
+            }
+
+        # ==============================================================
         # 1.6 MULTI-ATTRIBUTE & OUT-OF-ORDER INPUT PROCESSOR
         # (Users providing room first, hotel first, dates first, or everything all-at-once)
         # ==============================================================
@@ -2400,6 +2608,29 @@ class BookingAgent:
                 quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
 
             reply = f"{prefix}{room_list_str}{suffix}"
+            session.setdefault("messages", []).append({
+                "role": "assistant",
+                "content": reply,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            db_manager.save_session(session["session_id"], session)
+            return {
+                "session_id": session["session_id"],
+                "reply": reply,
+                "current_step": session.get("current_step"),
+                "state": session,
+                "quick_replies": quick_replies,
+                "booking": None
+            }
+
+        # ==============================================================
+        # 1.57 RECOMMENDATION & ADVISORY INTELLIGENCE INTERCEPT
+        # (Answers "which is best", "which room is best", "what do you recommend" with smart reasons)
+        # ==============================================================
+        rec_res = self.check_recommendation_inquiry(user_text, session)
+        if rec_res:
+            reply = rec_res["reply"]
+            quick_replies = rec_res["quick_replies"]
             session.setdefault("messages", []).append({
                 "role": "assistant",
                 "content": reply,

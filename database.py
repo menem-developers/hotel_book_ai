@@ -516,6 +516,17 @@ class DatabaseManager:
         """Search booking by Reference Code, Guest Name, Company Name, or Email."""
         if not self.is_connected:
             self._connect()
+        if not self.is_connected or self.bookings_collection is None:
+            q_lower = query.strip().lower()
+            for b in self._in_memory_bookings.values():
+                if (
+                    q_lower in b.get("booking_id", "").lower()
+                    or q_lower in b.get("guest_name", "").lower()
+                    or q_lower in b.get("company_name", "").lower()
+                    or q_lower in b.get("contact_email", "").lower()
+                ):
+                    return b
+            return None
         q = query.strip()
         if not q:
             return None
@@ -549,6 +560,12 @@ class DatabaseManager:
         """Delete a reservation from MongoDB by booking ID."""
         if not self.is_connected:
             self._connect()
+        if not self.is_connected or self.bookings_collection is None:
+            bk_id = booking_id.strip().upper()
+            if bk_id in _in_memory_bookings:
+                del _in_memory_bookings[bk_id]
+                return True
+            return False
         res = self.bookings_collection.delete_one({
             "booking_id": {"$regex": f"^{booking_id.strip()}$", "$options": "i"}
         })
