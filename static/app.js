@@ -307,38 +307,9 @@ function renderInChatOptions(options) {
     `;
   }
 
-  // 3. Room Type Cards
-  if (options.type === "rooms" && options.items) {
-    return `
-      <div class="in-chat-options-container">
-        <div class="options-title-bar">
-          <i class="fa-solid fa-door-open"></i> Available Room Categories:
-        </div>
-        <div class="rooms-cards-list">
-          ${options.items.map(r => `
-            <div class="inchat-room-card" onclick="handleQuickSelect('${escapeHtml(r.name)}')">
-              <div class="inchat-room-thumb-box">
-                <img src="${r.image_url || 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=600&q=80'}" alt="${escapeHtml(r.name)}" class="inchat-room-thumb" loading="lazy">
-                ${r.badge ? `<span class="inchat-room-badge">${escapeHtml(r.badge)}</span>` : ''}
-              </div>
-              <div class="inchat-room-body">
-                <div class="inchat-room-title-row">
-                  <span class="inchat-room-name">${escapeHtml(r.name)}</span>
-                  <span class="inchat-room-price">$${r.price_per_night}/nt</span>
-                </div>
-                <p class="inchat-room-desc">${escapeHtml(r.description || '')}</p>
-                <div class="inchat-room-meta">
-                  <span class="inchat-meta-pill"><i class="fa-solid fa-user-group"></i> Max ${r.capacity_per_room || 2}</span>
-                  <span class="inchat-meta-pill" style="color: ${(r.total_rooms || 0) === 0 ? '#ef4444' : '#059669'};">
-                    ${(r.total_rooms || 0) === 0 ? 'Sold Out' : `${r.total_rooms} Available`}
-                  </span>
-                </div>
-              </div>
-            </div>
-          `).join("")}
-        </div>
-      </div>
-    `;
+  // 3. Room Type Cards (extra details omitted - only clickable options rendered via quick replies)
+  if (options.type === "rooms") {
+    return "";
   }
 
   // Food & Dining Option Cards

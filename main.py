@@ -142,14 +142,20 @@ async def initialize_chat(request: ResetRequest):
     elif current_st == "ASK_HOTEL":
         options = {"type": "hotels", "items": db_manager.get_all_hotels(location_id=session.get("location_id"))}
     elif current_st == "ASK_ROOM_TYPE":
-        options = {"type": "rooms", "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))}
+        options = None
+
+    qr_list = []
+    if current_st == STEP_ASK_LOCATION:
+        qr_list = booking_agent.get_location_quick_replies()
+    elif current_st == "ASK_ROOM_TYPE":
+        qr_list = booking_agent.get_room_quick_replies(session.get("hotel_id"))
 
     return {
         "session_id": session["session_id"],
         "reply": welcome_text,
         "current_step": current_st,
         "state": session,
-        "quick_replies": booking_agent.get_location_quick_replies() if current_st == STEP_ASK_LOCATION else [],
+        "quick_replies": qr_list,
         "options": options
     }
 

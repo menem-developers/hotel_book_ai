@@ -2061,18 +2061,11 @@ class BookingAgent:
             return reply, ["1 Room", "2 Rooms", "3 Rooms", "4 Rooms"], None
 
         elif step == STEP_ASK_ROOM_TYPE:
-            room_list_str = self.format_room_options_text(hotel_id=session.get("hotel_id"))
             reply = (
                 f"{extra_prefix}"
-                f"Here are our available room categories at **{session.get('hotel_name', 'Luxury Hotel')}**:\n\n"
-                f"{room_list_str}\n\n"
-                f"**Which room type would you prefer for your stay?**"
+                f"Which room type would you prefer for your stay at **{session.get('hotel_name', 'our hotel')}**?"
             )
-            return reply, self.get_room_quick_replies(session.get("hotel_id")), {
-                "type": "rooms",
-                "hotel_name": session.get("hotel_name"),
-                "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
-            }
+            return reply, self.get_room_quick_replies(session.get("hotel_id")), None
 
         elif step == STEP_ASK_CHECKIN_DATE:
             reply = (
@@ -2691,26 +2684,22 @@ class BookingAgent:
         # 3. ROOM CATALOG INQUIRY
         # ==============================================================
         if is_inquiring_about_rooms(user_text) and current_step not in [STEP_CONFIRMATION, STEP_COMPLETED]:
-            room_list_str = self.format_room_options_text(hotel_id=session.get("hotel_id"))
             members = session.get("total_members")
             rooms_cnt = session.get("rooms_count")
 
-            prefix = f"Here are the luxury rooms available at **{session.get('hotel_name', 'Luxury Hotel')}**:\n\n"
-            suffix = ""
             if members and not rooms_cnt:
-                suffix = f"\n\nFor your group of **{members} guests**, how many rooms would you like to book, or which room type do you prefer?"
+                reply = f"For your group of **{members} guests**, how many rooms would you like to reserve at **{session.get('hotel_name', 'our hotel')}**?"
                 session["current_step"] = STEP_ASK_ROOMS_COUNT
                 quick_replies = ["1 Room", "2 Rooms", "3 Rooms", "4 Rooms"]
             elif rooms_cnt:
-                suffix = f"\n\nWhich of these room types would you like to reserve for your **{rooms_cnt} room(s)**?"
+                reply = f"Which room type would you like to reserve for your **{rooms_cnt} room(s)** at **{session.get('hotel_name', 'our hotel')}**?"
                 session["current_step"] = STEP_ASK_ROOM_TYPE
                 quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
             else:
-                suffix = "\n\nWhich room type would you prefer for your stay?"
+                reply = f"Which room type would you prefer for your stay at **{session.get('hotel_name', 'our hotel')}**?"
                 session["current_step"] = STEP_ASK_ROOM_TYPE
                 quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
 
-            reply = f"{prefix}{room_list_str}{suffix}"
             session.setdefault("messages", []).append({
                 "role": "assistant",
                 "content": reply,
@@ -3176,8 +3165,7 @@ class BookingAgent:
                     reply = f"Did you mean **{matched_room['name']}** (${int(matched_room.get('price_per_night', 100))}/night)? (Is that right?)"
                     quick_replies = [f"Yes, {matched_room['name']}", "No, choose another"]
                 else:
-                    room_list_str = self.format_room_options_text(hotel_id=session.get("hotel_id"))
-                    reply = f"Here are our available room options:\n\n{room_list_str}\n\nWhich room type would you like to reserve?"
+                    reply = f"Which room type would you like to reserve at **{session.get('hotel_name', 'our hotel')}**?"
                     quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
 
         # ==============================================================
@@ -3256,12 +3244,9 @@ class BookingAgent:
 
                 if not is_available:
                     # Inform user room is not available for those dates!
-                    room_list_str = self.format_room_options_text(hotel_id=session.get("hotel_id"))
                     reply = (
                         f"{avail_msg}\n\n"
-                        f"Here are the other available rooms at **{session.get('hotel_name', 'our hotel')}**:\n\n"
-                        f"{room_list_str}\n\n"
-                        f"Would you like to choose another room type or adjust your dates?"
+                        f"Which other room type would you prefer at **{session.get('hotel_name', 'our hotel')}**, or would you like to adjust your dates?"
                     )
                     quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
                     session["current_step"] = STEP_ASK_ROOM_TYPE
@@ -3622,11 +3607,7 @@ class BookingAgent:
                     "items": db_manager.get_all_hotels(location_id=session.get("location_id"))
                 }
             elif current_step_now == STEP_ASK_ROOM_TYPE:
-                options_data = {
-                    "type": "rooms",
-                    "hotel_name": session.get("hotel_name"),
-                    "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
-                }
+                options_data = None
             elif current_step_now == STEP_ASK_AIRPORT_VEHICLE:
                 options_data = {
                     "type": "vehicles",
