@@ -1206,8 +1206,13 @@ class BookingAgent:
             r'\b(types?\s+(?:of\s+)?rooms?|room\s+types?|room\s+categories|what\s+(?:are\s+the\s+)?rooms?|which\s+rooms?|available\s+rooms?|rooms?\s+available|show\s+rooms?|room\s+options|list\s+of\s+rooms?|what\s+room|what\s+types?\s+(?:of\s+)?rooms?|room\s+details?|tell\s+me\s+room\s+details)\b',
             t
         ) or (re.search(r'\b(room|rooms)\b', t) and re.search(r'\b(type|types|category|categories|options|available|details|list|show)\b', t)))
-        details_asked = bool(re.search(r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel|amenities|facilities|services|features|overview)\b', t) or
-                             re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for|what\s+about)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
+        details_asked = bool(
+            re.search(r'\b(?:hotel|property|room)?\s*(?:details|info|information|overview|features|amenities|reviews?|ratings?)\b', t) or
+            re.search(r'\b(?:give|tell|show|get|share|provide|need|want|have|what|how)\s+(?:me\s+)?(?:more\s+)?(?:the\s+)?(?:details|info|information|reviews?|overview|specs)\b', t) or
+            re.search(r'\b(?:details|info|information|reviews?)\s+(?:about|of|on|for)\b', t) or
+            re.search(r'\b(?:tell\s+me\s+about|what\s+about|how\s+is|know\s+about|explain\s+about|more\s+about|about\s+the|about\s+this)\b', t) or
+            re.search(r'\b(?:hotel details|property details|room details|tell me about|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?)\b', t)
+        )
 
         # Check if user mentioned or selected a specific room
         room_name = session.get("room_name")
@@ -1217,8 +1222,9 @@ class BookingAgent:
 
         sections = []
 
-        # If user asked for general details/reviews OR asked multiple aspects (>= 2)
-        is_comprehensive = details_asked or (sum([bed_asked, balcony_asked, smoking_asked, food_comp_asked]) >= 2)
+        # Single aspect only if exactly one specific sub-question was asked without a general details request
+        is_single_aspect = (sum([bed_asked, balcony_asked, smoking_asked, food_comp_asked, rooms_asked]) == 1) and not details_asked
+        is_comprehensive = not is_single_aspect
 
         # Get actual rooms for the hotel
         hotel_rooms = db_manager.get_all_rooms(hotel_id=hotel.get("hotel_id"))
@@ -1432,10 +1438,13 @@ class BookingAgent:
             t
         ) or (re.search(r'\b(room|rooms)\b', t) and re.search(r'\b(type|types|category|categories|options|available|details|list|show)\b', t)))
 
-        details_asked = bool(re.search(
-            r'\b(hotel details|property details|tell me about (?:the |this )?hotel|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?|what are the details of (?:the |this )?hotel|reviews of (?:the |this )?hotel|amenities|facilities|services|features|overview)\b',
-            t
-        ) or re.search(r'\b(?:tell\s+me\s+about|details\s+of|reviews\s+for|what\s+about)\s+(?:the\s+)?[a-z\s]{3,}\b', t))
+        details_asked = bool(
+            re.search(r'\b(?:hotel|property|room)?\s*(?:details|info|information|overview|features|amenities|reviews?|ratings?)\b', t) or
+            re.search(r'\b(?:give|tell|show|get|share|provide|need|want|have|what|how)\s+(?:me\s+)?(?:more\s+)?(?:the\s+)?(?:details|info|information|reviews?|overview|specs)\b', t) or
+            re.search(r'\b(?:details|info|information|reviews?)\s+(?:about|of|on|for)\b', t) or
+            re.search(r'\b(?:tell\s+me\s+about|what\s+about|how\s+is|know\s+about|explain\s+about|more\s+about|about\s+the|about\s+this)\b', t) or
+            re.search(r'\b(?:hotel details|property details|room details|tell me about|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?)\b', t)
+        )
 
         if not any([bed_asked, balcony_asked, smoking_asked, food_comp_asked, rooms_asked, details_asked]):
             return None
@@ -1462,14 +1471,22 @@ class BookingAgent:
             session["pending_hotel_detail_inquiry"] = user_text
             city = session.get("location_city")
             loc_id = session.get("location_id")
-            hotels_list = db_manager.get_all_hotels(location_id=loc_id) if loc_id else db_manager.get_all_hotels()[:5]
-            hotel_names = [h["name"] for h in hotels_list[:5]]
+            hotels_list = db_manager.get_all_hotels(location_id=loc_id) if loc_id else db_manager.get_all_hotels()[:10]
+            hotel_names = [h["name"] for h in hotels_list]
             dest_hint = f" in **{city}**" if city else ""
             topic = "room types and rates" if rooms_asked else "authentic Google reviews and property details"
+
+            hotel_bullets = []
+            for h in hotels_list:
+                hotel_bullets.append(f"• **{h['name']}** ({h.get('rating', 4.5)}⭐) — {h.get('badge', h.get('address', ''))}")
+            hotels_preview = "\n".join(hotel_bullets)
+
             reply = (
-                f"I would be glad to check the {topic}!\n\n"
-                f"**Which hotel{dest_hint} would you like me to check {topic} for?**\n"
-                f"Please tell me the hotel name or select from the options below:"
+                f"I'd be happy to share details and Google reviews for our properties{dest_hint}!\n\n"
+                f"**Available Hotels{dest_hint}**:\n"
+                f"{hotels_preview}\n\n"
+                f"**Which hotel would you like full details, bed configurations, and Google reviews for?**\n"
+                f"(Click a hotel name below or type it, and I'll pull the live verified details for you!)"
             )
             return {
                 "reply": reply,
@@ -1758,47 +1775,54 @@ class BookingAgent:
         if loc and (l_type == 'exact' or l_score >= 0.70):
             extracted['location'] = loc
 
+        # Check if text is an inquiry asking for details rather than a booking selection
+        is_inquiry_phrase = bool(
+            re.search(r'\b(?:give|tell|show|get|share|what|how|about|is there|do you have)\b', t) and
+            re.search(r'\b(?:details|info|information|reviews?|ratings?|specs?|amenities|smoke|smoking|balcony|breakfast|food|bed|beds)\b', t)
+        ) or bool(re.search(r'\b(?:details\s+about|details\s+of|tell\s+me\s+about|reviews\s+of|hotel\s+details|room\s+details|what\s+about)\b', t))
+
         # 2. Hotel
         # CRITICAL: If location was matched from the current user input,
         # only extract a hotel if the user input ALSO explicitly names a distinct hotel
         # beyond the location name, city, and airport code (e.g. "The Plaza New York", "TWA Hotel JFK").
         htl = None
-        if loc:
-            loc_tokens = {
-                loc.get('city', '').lower(),
-                loc.get('airport_code', '').lower(),
-                loc.get('name', '').lower(),
-                'airport', 'international', 'in', 'at', 'near', 'to', 'for', 'hotel', 'hotels', 'destination'
-            }
-            raw_words = re.findall(r'[a-zA-Z0-9]+', t)
-            residual_words = [w for w in raw_words if w not in loc_tokens and w not in CITY_AND_AIRPORT_WORDS]
-            if residual_words:
-                residual_text = " ".join(residual_words)
-                htl, h_type, h_score = check_hotel_match_with_fuzzy(residual_text, location_id=loc['location_id'])
-                if not htl:
-                    htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=loc['location_id'])
+        if not is_inquiry_phrase:
+            if loc:
+                loc_tokens = {
+                    loc.get('city', '').lower(),
+                    loc.get('airport_code', '').lower(),
+                    loc.get('name', '').lower(),
+                    'airport', 'international', 'in', 'at', 'near', 'to', 'for', 'hotel', 'hotels', 'destination'
+                }
+                raw_words = re.findall(r'[a-zA-Z0-9]+', t)
+                residual_words = [w for w in raw_words if w not in loc_tokens and w not in CITY_AND_AIRPORT_WORDS]
+                if residual_words:
+                    residual_text = " ".join(residual_words)
+                    htl, h_type, h_score = check_hotel_match_with_fuzzy(residual_text, location_id=loc['location_id'])
+                    if not htl:
+                        htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=loc['location_id'])
+                    if htl and (h_type == 'exact' or h_score >= 0.75):
+                        is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
+                        if not (session.get("hotel_id") and is_count):
+                            extracted['hotel'] = htl
+            else:
+                loc_id = session.get('location_id')
+                htl, h_type, h_score = check_hotel_match_with_fuzzy(
+                    text,
+                    location_id=loc_id,
+                    allow_bare_ordinals=(session.get("current_step") == STEP_ASK_HOTEL)
+                )
+                if not htl and not loc_id:
+                    # Only search across other locations if location is completely unspecified
+                    htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=None)
                 if htl and (h_type == 'exact' or h_score >= 0.75):
                     is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
                     if not (session.get("hotel_id") and is_count):
                         extracted['hotel'] = htl
-        else:
-            loc_id = session.get('location_id')
-            htl, h_type, h_score = check_hotel_match_with_fuzzy(
-                text,
-                location_id=loc_id,
-                allow_bare_ordinals=(session.get("current_step") == STEP_ASK_HOTEL)
-            )
-            if not htl and not loc_id:
-                # Only search across other locations if location is completely unspecified
-                htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=None)
-            if htl and (h_type == 'exact' or h_score >= 0.75):
-                is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
-                if not (session.get("hotel_id") and is_count):
-                    extracted['hotel'] = htl
-                    if 'location' not in extracted and htl.get('location_id'):
-                        matched_loc = db_manager.get_location_by_id(htl['location_id'])
-                        if matched_loc:
-                            extracted['location'] = matched_loc
+                        if 'location' not in extracted and htl.get('location_id'):
+                            matched_loc = db_manager.get_location_by_id(htl['location_id'])
+                            if matched_loc:
+                                extracted['location'] = matched_loc
 
         # 3. Room
         is_guest_type_context = any(k in t for k in ["company", "corporate", "individual", "personal", "booking as", "on behalf"])
