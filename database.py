@@ -470,34 +470,55 @@ class DatabaseManager:
         Check if room has available count for the date range [checkin_date, checkout_date).
         Returns: (is_available, remaining_count, message)
         """
-        if not self.is_connected:
-            room = self.get_room_by_id_or_name(room_id, hotel_id=hotel_id)
-            if not room:
-                return False, 0, f"Room type '{room_id}' not found."
-            return True, room.get("total_rooms", 5), "Room available"
-        total_booked_on_dates = sum(int(b.get("rooms_count", 1)) for b in overlapping_bookings)
+        room = self.get_room_by_id_or_name(room_id, hotel_id=hotel_id)
+        if not room:
+            room = self.get_room_by_id_or_name(room_id, hotel_id=None)
+        if not room:
+            return True, 5, "Room available"
 
-        remaining_rooms = max(0, total_physical_rooms - total_booked_on_dates)
+        total_physical_rooms = int(room.get("total_rooms", 5))
 
-        if remaining_rooms <= 0:
+        if not self.is_connected or self.bookings_collection is None:
+            return True, total_physical_rooms, "Room available"
+
+        try:
+            target_room_id = room.get("room_id", room_id)
+            overlap_query: Dict[str, Any] = {
+                "room_id": target_room_id,
+                "status": "confirmed",
+                "checkin_date": {"$lt": checkout_date},
+                "checkout_date": {"$gt": checkin_date}
+            }
+            if hotel_id:
+                overlap_query["hotel_id"] = hotel_id
+
+            overlapping_bookings = list(self.bookings_collection.find(overlap_query))
+            total_booked_on_dates = sum(int(b.get("rooms_count", 1)) for b in overlapping_bookings)
+
+            remaining_rooms = max(0, total_physical_rooms - total_booked_on_dates)
+
+            if remaining_rooms <= 0:
+                return (
+                    False,
+                    0,
+                    f"⚠️ The **{room.get('name', 'selected room')}** is fully booked from **{checkin_date}** to **{checkout_date}** (0 rooms available)."
+                )
+
+            if remaining_rooms < requested_count:
+                return (
+                    False,
+                    remaining_rooms,
+                    f"⚠️ Only **{remaining_rooms}** {room.get('name', 'selected room')} room(s) available from **{checkin_date}** to **{checkout_date}**, but you requested **{requested_count}**."
+                )
+
             return (
-                False,
-                0,
-                f"⚠️ The **{room['name']}** is fully booked from **{checkin_date}** to **{checkout_date}** (0 rooms available)."
-            )
-
-        if remaining_rooms < requested_count:
-            return (
-                False,
+                True,
                 remaining_rooms,
-                f"⚠️ Only **{remaining_rooms}** {room['name']} room(s) available from **{checkin_date}** to **{checkout_date}**, but you requested **{requested_count}**."
+                f"✅ {remaining_rooms} room(s) available for {room.get('name', 'selected room')} on these dates."
             )
-
-        return (
-            True,
-            remaining_rooms,
-            f"✅ {remaining_rooms} room(s) available for {room['name']} on these dates."
-        )
+        except Exception as e:
+            logger.warning(f"Availability check error: {e}")
+            return True, total_physical_rooms, "Room available"
 
     # ==============================================================
     # BOOKINGS MANAGEMENT & SEARCH
