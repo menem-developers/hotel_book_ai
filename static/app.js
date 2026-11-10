@@ -67,6 +67,13 @@ function setupAppListeners() {
     };
   }
 
+  const micModal = document.getElementById("mic-permission-modal");
+  if (micModal) {
+    micModal.onclick = (e) => {
+      if (e.target === micModal) closeMicPermissionModal();
+    };
+  }
+
   if (btnAttachDummy) {
     btnAttachDummy.onclick = () => {
       showToast("Attachment option is a demo dummy feature. Please type your details in chat.");
@@ -437,12 +444,71 @@ function stopAudioVisualizer() {
   });
 }
 
-function startVoiceRecording() {
+// Microphone Permission Modal Helpers
+function showMicPermissionModal(title, subtitle, statusText) {
+  const modal = document.getElementById("mic-permission-modal");
+  const titleEl = document.getElementById("mic-modal-title");
+  const subEl = document.getElementById("mic-modal-subtitle");
+  const statusEl = document.getElementById("mic-status-text");
+
+  if (title && titleEl) titleEl.textContent = title;
+  if (subtitle && subEl) subEl.textContent = subtitle;
+  if (statusText && statusEl) statusEl.textContent = statusText;
+
+  if (modal) modal.classList.add("open");
+}
+window.showMicPermissionModal = showMicPermissionModal;
+
+function closeMicPermissionModal() {
+  const modal = document.getElementById("mic-permission-modal");
+  if (modal) modal.classList.remove("open");
+}
+window.closeMicPermissionModal = closeMicPermissionModal;
+
+function handleRetryMicPermission() {
+  closeMicPermissionModal();
+  startVoiceRecording();
+}
+window.handleRetryMicPermission = handleRetryMicPermission;
+
+// Listen to browser permission changes when supported
+if (navigator.permissions && navigator.permissions.query) {
+  navigator.permissions.query({ name: "microphone" }).then(permissionStatus => {
+    permissionStatus.onchange = () => {
+      if (permissionStatus.state === "granted") {
+        closeMicPermissionModal();
+        showToast("Microphone permission granted. You can speak to the assistant!");
+      }
+    };
+  }).catch(() => {});
+}
+
+async function startVoiceRecording() {
+  // 1. Check for secure context (Browsers block mic on remote plain HTTP)
+  const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (!window.isSecureContext && !isLocal) {
+    showMicPermissionModal(
+      "HTTPS Connection Required",
+      "Browsers block microphone recording over plain HTTP",
+      "Modern web browsers (Chrome, Edge, Safari, Firefox) strictly require an HTTPS (SSL) connection or localhost to allow microphone access. Please access via HTTPS or localhost."
+    );
+    return;
+  }
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showMicPermissionModal(
+      "Microphone Not Supported",
+      "Your browser does not support audio recording",
+      "Please update your browser to the latest version of Chrome, Edge, Safari, or Firefox."
+    );
+    return;
+  }
+
+  // 2. Open recording overlay UI immediately
   isRecording = true;
   audioChunks = [];
   recordingSeconds = 0;
 
-  // 1. IMMEDIATELY switch UI: show recording overlay and hide chat form
   const overlay = document.getElementById("voice-recording-overlay");
   const form = document.getElementById("chat-form");
   const btnRec = document.getElementById("btn-voice-record");
@@ -453,7 +519,7 @@ function startVoiceRecording() {
 
   updateTimerDisplay();
 
-  // 2. Start timer ticking every second
+  // 3. Start timer
   if (recordingTimerInterval) clearInterval(recordingTimerInterval);
   recordingTimerInterval = setInterval(() => {
     recordingSeconds++;
@@ -463,29 +529,38 @@ function startVoiceRecording() {
     }
   }, 1000);
 
-  // 3. Request microphone access and attach real-time visualizer
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        if (!isRecording) {
-          stream.getTracks().forEach(t => t.stop());
-          return;
-        }
-        currentMediaStream = stream;
-        initMediaRecorder(stream);
-        try {
-          mediaRecorder.start(200);
-        } catch (e) {
-          console.warn("MediaRecorder start error:", e);
-        }
-        startAudioVisualizer(stream);
-      })
-      .catch(err => {
-        console.warn("Microphone access prompt or error:", err);
-        showToast("Microphone note: " + (err.message || "Please allow microphone permission. Audio visualizer is running."));
-      });
-  } else {
-    showToast("Microphone requires HTTPS or localhost. Recording studio is active.");
+  // 4. Request microphone access (this automatically pops up the browser's native permission dialog!)
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!isRecording) {
+      // If user cancelled while the permission dialog was open
+      stream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    currentMediaStream = stream;
+    initMediaRecorder(stream);
+    try {
+      mediaRecorder.start(200);
+    } catch (e) {
+      console.warn("MediaRecorder start error:", e);
+    }
+    startAudioVisualizer(stream);
+    closeMicPermissionModal();
+  } catch (err) {
+    console.warn("Microphone access error:", err);
+    cleanupRecordingUI();
+
+    if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      showMicPermissionModal(
+        "Microphone Access Denied",
+        "Permission was blocked in your browser",
+        "Your browser blocked microphone access. Click the lock (🔒) icon in your address bar, set Microphone to 'Allow', then click 'Allow & Try Again'."
+      );
+    } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+      showToast("No microphone device was found on this computer.");
+    } else {
+      showToast("Could not access microphone: " + (err.message || err.name));
+    }
   }
 }
 window.startVoiceRecording = startVoiceRecording;

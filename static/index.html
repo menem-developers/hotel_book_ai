@@ -273,6 +273,50 @@
     </div>
   </div>
 
+  <!-- MODAL: MICROPHONE PERMISSION GUIDE -->
+  <div class="modal-overlay" id="mic-permission-modal">
+    <div class="modal-box mic-modal-box">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge mic-badge">
+            <i class="fa-solid fa-microphone"></i>
+          </div>
+          <div>
+            <h3 id="mic-modal-title">Microphone Access Needed</h3>
+            <p id="mic-modal-subtitle">Enable your microphone to speak with Northstar AI</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-mic-modal" onclick="closeMicPermissionModal()">&times;</button>
+      </div>
+
+      <div class="modal-body mic-modal-body">
+        <div class="mic-status-banner" id="mic-status-banner">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span id="mic-status-text">Your browser requires microphone permission to record voice.</span>
+        </div>
+
+        <div class="mic-steps-card">
+          <h4>How to enable microphone in your browser:</h4>
+          <ol class="mic-steps-list">
+            <li>Check the <strong>browser address bar</strong> at the top of this window.</li>
+            <li>Click the <strong>padlock (🔒)</strong> or <strong>tune / site settings</strong> icon next to the website URL.</li>
+            <li>Find <strong>Microphone</strong> in the permissions list and set it to <strong>"Allow"</strong>.</li>
+            <li>Click the green <strong>"Allow & Try Again"</strong> button below to start recording.</li>
+          </ol>
+        </div>
+
+        <div class="mic-modal-actions">
+          <button type="button" class="btn-mic-try-again" id="btn-mic-request-perm" onclick="handleRetryMicPermission()">
+            <i class="fa-solid fa-microphone"></i> Allow & Try Again
+          </button>
+          <button type="button" class="btn-mic-dismiss" id="btn-mic-dismiss" onclick="closeMicPermissionModal()">
+            Continue with text typing
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- TOAST NOTIFICATION CONTAINER -->
   <div class="toast-container" id="toast-container"></div>
 
