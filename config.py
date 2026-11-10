@@ -25,4 +25,7 @@ class Settings:
     SERPAPI_API_KEY: str = os.getenv("SERPAPI_API_KEY", "4cefc24c4e2d0e0e05a1091244f3a591e262dc75a6bbd25fe9712afd6205e8c8")
     SERPAPI_BASE_URL: str = os.getenv("SERPAPI_BASE_URL", "https://serpapi.com/search.json")
 
+    # Voice / Natural Neural TTS Settings
+    TTS_VOICE: str = os.getenv("TTS_VOICE", "en-US-AriaNeural")
+
 settings = Settings()

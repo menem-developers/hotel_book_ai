@@ -175,7 +175,7 @@ async def chat_message(req: ChatRequest):
     # Generate TTS audio for the reply so frontend can speak at the same time
     try:
         reply_text = result.get("reply", "")
-        result["audio_base64"] = voice_service.generate_tts_data_uri(reply_text)
+        result["audio_base64"] = await voice_service.generate_tts_data_uri_async(reply_text)
     except Exception as e:
         logger.warning(f"Failed to generate TTS audio in /api/chat: {e}")
         result["audio_base64"] = None
@@ -225,7 +225,7 @@ async def voice_chat(
 
         # Generate TTS audio for the reply text
         reply_text = result.get("reply", "")
-        audio_base64 = voice_service.generate_tts_data_uri(reply_text)
+        audio_base64 = await voice_service.generate_tts_data_uri_async(reply_text)
 
         return VoiceChatResponse(
             success=True,
@@ -251,7 +251,7 @@ async def voice_chat(
 async def tts_endpoint_post(req: TTSRequest):
     """Generate and return MP3 audio for any given text."""
     try:
-        audio_bytes = voice_service.generate_tts_audio_bytes(req.text)
+        audio_bytes = await voice_service.generate_tts_audio_bytes_async(req.text)
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech audio")
         return Response(content=audio_bytes, media_type="audio/mpeg")
@@ -262,7 +262,7 @@ async def tts_endpoint_post(req: TTSRequest):
 async def tts_endpoint_get(text: str = Query(..., description="Text to synthesize to speech")):
     """GET endpoint to play or stream MP3 speech directly."""
     try:
-        audio_bytes = voice_service.generate_tts_audio_bytes(text)
+        audio_bytes = await voice_service.generate_tts_audio_bytes_async(text)
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech audio")
         return Response(content=audio_bytes, media_type="audio/mpeg")
