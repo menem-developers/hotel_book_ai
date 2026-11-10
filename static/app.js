@@ -707,7 +707,7 @@ function speakViaBrowserTTS(text) {
     const clean = text
       .replace(/[*_#`~]/g, '')
       .replace(/https?:\/\/\S+/g, '')
-      .replace(/[\U00010000-\U0010ffff]/gu, '')
+      .replace(/[\u{10000}-\u{10ffff}]/gu, '')
       .replace(/[\u2000-\u3300]/gu, '')
       .replace(/[•\-\*\+]/g, '')
       .trim();
