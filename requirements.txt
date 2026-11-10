@@ -1,6 +1,11 @@
 # Web Framework & Server
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
+python-multipart>=0.0.9
+
+# Voice Speech-to-Text & Text-to-Speech
+openai-whisper>=20231117
+gTTS>=2.5.0
 
 # Database Client with SRV DNS resolution support for MongoDB Atlas
 pymongo[srv]>=4.6.0
