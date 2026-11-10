@@ -17,20 +17,26 @@ const typingIndicator = document.getElementById("typing-indicator");
 
 // Voice & Audio DOM Elements
 const btnVoiceRecord = document.getElementById("btn-voice-record");
-const voiceRecordingBar = document.getElementById("voice-recording-bar");
+const voiceRecordingOverlay = document.getElementById("voice-recording-overlay");
 const voiceTimer = document.getElementById("voice-timer");
+const btnVoiceRestart = document.getElementById("btn-voice-restart");
 const btnVoiceCancel = document.getElementById("btn-voice-cancel");
-const btnVoiceOk = document.getElementById("btn-voice-ok");
+const btnVoiceStop = document.getElementById("btn-voice-stop");
 const btnToggleTts = document.getElementById("btn-toggle-tts");
+const voiceWaveBars = document.getElementById("voice-wave-bars");
 
 // Voice & Audio State
 let mediaRecorder = null;
+let currentMediaStream = null;
 let audioChunks = [];
 let recordingTimerInterval = null;
 let recordingSeconds = 0;
 let isRecording = false;
 let ttsEnabled = true; // Auto-speech ON by default
 let currentAudioPlayer = null;
+let audioContext = null;
+let audioAnalyser = null;
+let audioVisualizerFrame = null;
 
 // Sidebar Nav Elements
 const btnNewChat = document.getElementById("btn-new-chat");
@@ -303,12 +309,16 @@ function initVoiceFeatures() {
     });
   }
 
-  if (btnVoiceOk) {
-    btnVoiceOk.addEventListener("click", stopAndSendVoice);
+  if (btnVoiceRestart) {
+    btnVoiceRestart.addEventListener("click", restartVoiceRecording);
   }
 
   if (btnVoiceCancel) {
     btnVoiceCancel.addEventListener("click", cancelVoiceRecording);
+  }
+
+  if (btnVoiceStop) {
+    btnVoiceStop.addEventListener("click", stopAndSendVoice);
   }
 
   if (btnToggleTts) {
@@ -332,6 +342,80 @@ function initVoiceFeatures() {
   }
 }
 
+function initMediaRecorder(stream) {
+  let options = {};
+  if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+    options = { mimeType: "audio/webm;codecs=opus" };
+  } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+    options = { mimeType: "audio/webm" };
+  } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+    options = { mimeType: "audio/mp4" };
+  }
+
+  mediaRecorder = new MediaRecorder(stream, options);
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) {
+      audioChunks.push(e.data);
+    }
+  };
+}
+
+function startAudioVisualizer(stream) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    audioContext = new AudioCtx();
+    const source = audioContext.createMediaStreamSource(stream);
+    audioAnalyser = audioContext.createAnalyser();
+    audioAnalyser.fftSize = 64;
+    source.connect(audioAnalyser);
+
+    const bufferLength = audioAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    const bars = document.querySelectorAll(".voice-wave-bars .v-bar");
+
+    function renderWaves() {
+      if (!isRecording) return;
+      audioVisualizerFrame = requestAnimationFrame(renderWaves);
+      audioAnalyser.getByteFrequencyData(dataArray);
+
+      bars.forEach((bar, index) => {
+        const binIndex = Math.floor((index / bars.length) * (bufferLength / 2));
+        const val = dataArray[binIndex] || 0;
+        const height = Math.max(6, Math.min(34, Math.round((val / 255) * 34)));
+        bar.style.height = `${height}px`;
+        bar.style.opacity = (0.4 + (val / 255) * 0.6).toFixed(2);
+      });
+    }
+
+    renderWaves();
+  } catch (e) {
+    console.warn("Audio visualizer initialization:", e);
+  }
+}
+
+function stopAudioVisualizer() {
+  if (audioVisualizerFrame) {
+    cancelAnimationFrame(audioVisualizerFrame);
+    audioVisualizerFrame = null;
+  }
+  if (audioContext) {
+    try {
+      audioContext.close();
+    } catch (e) {}
+    audioContext = null;
+  }
+  audioAnalyser = null;
+
+  // Reset bar heights
+  const bars = document.querySelectorAll(".voice-wave-bars .v-bar");
+  bars.forEach(bar => {
+    bar.style.height = "";
+    bar.style.opacity = "";
+  });
+}
+
 async function startVoiceRecording() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showToast("Microphone access is not supported by your browser.");
@@ -339,48 +423,67 @@ async function startVoiceRecording() {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    currentMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
 
-    let options = {};
-    if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-      options = { mimeType: "audio/webm;codecs=opus" };
-    } else if (MediaRecorder.isTypeSupported("audio/webm")) {
-      options = { mimeType: "audio/webm" };
-    } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-      options = { mimeType: "audio/mp4" };
-    }
-
-    mediaRecorder = new MediaRecorder(stream, options);
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) {
-        audioChunks.push(e.data);
-      }
-    };
-
+    initMediaRecorder(currentMediaStream);
     mediaRecorder.start(200);
     isRecording = true;
 
-    // UI Updates
-    btnVoiceRecord.classList.add("recording-active");
-    if (voiceRecordingBar) voiceRecordingBar.style.display = "flex";
-    if (btnSend) btnSend.style.display = "none";
+    // UI Updates: switch to voice recording overlay
+    if (voiceRecordingOverlay) voiceRecordingOverlay.style.display = "flex";
+    if (chatForm) chatForm.style.display = "none";
+    if (btnVoiceRecord) btnVoiceRecord.classList.add("recording-active");
+
     recordingSeconds = 0;
     updateTimerDisplay();
 
+    if (recordingTimerInterval) clearInterval(recordingTimerInterval);
     recordingTimerInterval = setInterval(() => {
       recordingSeconds++;
       updateTimerDisplay();
-      if (recordingSeconds >= 60) {
+      if (recordingSeconds >= 90) {
         stopAndSendVoice();
       }
     }, 1000);
 
+    // Live wave visualizer
+    startAudioVisualizer(currentMediaStream);
+
   } catch (err) {
     console.error("Microphone access error:", err);
-    showToast("Could not access microphone. Please allow microphone permission in browser.");
+    showToast("Could not access microphone. Please allow microphone permission in your browser.");
+    cleanupRecordingUI();
   }
+}
+
+function restartVoiceRecording() {
+  if (!currentMediaStream || !isRecording) return;
+
+  // 1. Reset timer & chunks
+  recordingSeconds = 0;
+  updateTimerDisplay();
+  audioChunks = [];
+
+  // 2. Re-instantiate mediaRecorder on active stream to clear audio buffers cleanly
+  if (mediaRecorder) {
+    mediaRecorder.onstop = null;
+    mediaRecorder.ondataavailable = null;
+    try {
+      if (mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+    } catch (e) {}
+  }
+
+  initMediaRecorder(currentMediaStream);
+  try {
+    mediaRecorder.start(200);
+  } catch (e) {
+    console.warn("Error restarting MediaRecorder:", e);
+  }
+
+  showToast("Recording restarted from 0:00. Speak now...");
 }
 
 function updateTimerDisplay() {
@@ -396,16 +499,22 @@ function cleanupRecordingUI() {
     clearInterval(recordingTimerInterval);
     recordingTimerInterval = null;
   }
+  stopAudioVisualizer();
   if (btnVoiceRecord) btnVoiceRecord.classList.remove("recording-active");
-  if (voiceRecordingBar) voiceRecordingBar.style.display = "none";
-  if (btnSend) btnSend.style.display = "";
+  if (voiceRecordingOverlay) voiceRecordingOverlay.style.display = "none";
+  if (chatForm) chatForm.style.display = "";
 }
 
 function cancelVoiceRecording() {
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
     mediaRecorder.onstop = null;
-    mediaRecorder.stop();
-    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    try {
+      mediaRecorder.stop();
+    } catch (e) {}
+  }
+  if (currentMediaStream) {
+    currentMediaStream.getTracks().forEach(track => track.stop());
+    currentMediaStream = null;
   }
   audioChunks = [];
   cleanupRecordingUI();
@@ -413,14 +522,19 @@ function cancelVoiceRecording() {
 }
 
 async function stopAndSendVoice() {
-  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+  if (!mediaRecorder || mediaRecorder.state === "inactive" || !isRecording) return;
+
+  stopAudioVisualizer();
 
   mediaRecorder.onstop = async () => {
-    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    if (currentMediaStream) {
+      currentMediaStream.getTracks().forEach(track => track.stop());
+      currentMediaStream = null;
+    }
 
     if (audioChunks.length === 0) {
       cleanupRecordingUI();
-      showToast("No voice audio was captured.");
+      showToast("No voice audio was captured. Please try speaking again.");
       return;
     }
 
@@ -431,7 +545,12 @@ async function stopAndSendVoice() {
     await processVoiceAudioBlob(audioBlob);
   };
 
-  mediaRecorder.stop();
+  try {
+    mediaRecorder.stop();
+  } catch (e) {
+    console.warn("Error stopping media recorder:", e);
+    cleanupRecordingUI();
+  }
 }
 
 async function processVoiceAudioBlob(blob) {

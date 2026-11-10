@@ -150,6 +150,61 @@
       <!-- FLOATING CHAT INPUT CARD AT BOTTOM -->
       <div class="chat-input-wrapper">
         <div class="chat-input-card">
+          <!-- VOICE RECORDING OVERLAY (Shows when recording is active: waves, timer, restart & stop) -->
+          <div class="voice-recording-overlay" id="voice-recording-overlay" style="display: none;">
+            <div class="voice-recording-left">
+              <span class="voice-rec-badge">
+                <span class="voice-pulse-dot"></span>
+                <span>REC</span>
+              </span>
+              <span class="voice-timer" id="voice-timer">0:00</span>
+            </div>
+
+            <!-- Dynamic Live Sound Waves Visualizer -->
+            <div class="voice-waveform-container" id="voice-waveform-container">
+              <div class="voice-wave-bars" id="voice-wave-bars">
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+                <span class="v-bar"></span>
+              </div>
+            </div>
+
+            <!-- Voice Controls: Restart, Cancel, Stop & Send -->
+            <div class="voice-recording-actions">
+              <!-- Restart Button -->
+              <button type="button" class="btn-voice-action btn-voice-restart" id="btn-voice-restart" title="Restart recording from 0:00">
+                <i class="fa-solid fa-rotate-left"></i>
+                <span>Restart</span>
+              </button>
+
+              <!-- Cancel Button -->
+              <button type="button" class="btn-voice-action btn-voice-cancel" id="btn-voice-cancel" title="Cancel recording">
+                <i class="fa-solid fa-xmark"></i>
+                <span>Cancel</span>
+              </button>
+
+              <!-- Stop & Send Button -->
+              <button type="button" class="btn-voice-action btn-voice-stop" id="btn-voice-stop" title="Stop recording and send to AI">
+                <i class="fa-solid fa-stop"></i>
+                <span>Stop</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- STANDARD TEXT INPUT FORM -->
           <form id="chat-form">
             <textarea 
               id="chat-input" 
@@ -176,22 +231,6 @@
               </div>
 
               <div class="input-tools-right">
-                <!-- Active Voice Recording Control Bar -->
-                <div class="voice-recording-bar" id="voice-recording-bar" style="display: none;">
-                  <span class="voice-pulse-dot"></span>
-                  <span class="voice-status-text">Listening...</span>
-                  <span class="voice-timer" id="voice-timer">0:00</span>
-                  <div class="voice-wave-anim">
-                    <span></span><span></span><span></span><span></span>
-                  </div>
-                  <button type="button" class="btn-voice-cancel" id="btn-voice-cancel" title="Cancel recording">
-                    <i class="fa-solid fa-xmark"></i> Cancel
-                  </button>
-                  <button type="button" class="btn-voice-ok" id="btn-voice-ok" title="Finish and Send">
-                    <i class="fa-solid fa-check"></i> OK
-                  </button>
-                </div>
-
                 <button type="submit" class="btn-send-arrow" id="btn-send" title="Send message">
                   <i class="fa-solid fa-arrow-up"></i>
                 </button>
