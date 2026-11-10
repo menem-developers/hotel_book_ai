@@ -102,7 +102,7 @@
             <span class="dot-indicator"></span>
             <span>LIVE DEMO</span>
           </div>
-          <button class="icon-circle-btn active-tts" id="btn-toggle-tts" title="Voice Audio Speech (TTS: ON)">
+          <button class="icon-circle-btn active-tts" id="btn-toggle-tts" onclick="toggleTTS()" title="Voice Audio Speech (TTS: ON)">
             <i class="fa-solid fa-volume-high"></i>
           </button>
           <button class="icon-circle-btn" id="btn-help-faq" title="Help & System Info">
@@ -185,19 +185,19 @@
             <!-- Voice Controls: Restart, Cancel, Stop & Send -->
             <div class="voice-recording-actions">
               <!-- Restart Button -->
-              <button type="button" class="btn-voice-action btn-voice-restart" id="btn-voice-restart" title="Restart recording from 0:00">
+              <button type="button" class="btn-voice-action btn-voice-restart" id="btn-voice-restart" onclick="restartVoiceRecording()" title="Restart recording from 0:00">
                 <i class="fa-solid fa-rotate-left"></i>
                 <span>Restart</span>
               </button>
 
               <!-- Cancel Button -->
-              <button type="button" class="btn-voice-action btn-voice-cancel" id="btn-voice-cancel" title="Cancel recording">
+              <button type="button" class="btn-voice-action btn-voice-cancel" id="btn-voice-cancel" onclick="cancelVoiceRecording()" title="Cancel recording">
                 <i class="fa-solid fa-xmark"></i>
                 <span>Cancel</span>
               </button>
 
               <!-- Stop & Send Button -->
-              <button type="button" class="btn-voice-action btn-voice-stop" id="btn-voice-stop" title="Stop recording and send to AI">
+              <button type="button" class="btn-voice-action btn-voice-stop" id="btn-voice-stop" onclick="stopAndSendVoice()" title="Stop recording and send to AI">
                 <i class="fa-solid fa-stop"></i>
                 <span>Stop</span>
               </button>
@@ -216,7 +216,7 @@
             <div class="input-bottom-bar">
               <div class="input-tools-left">
                 <!-- Record / Mic Voice Button -->
-                <button type="button" class="btn-tool-icon btn-mic" id="btn-voice-record" title="Record Voice (Speak to Assistant)">
+                <button type="button" class="btn-tool-icon btn-mic" id="btn-voice-record" onclick="toggleVoiceRecording()" title="Record Voice (Speak to Assistant)">
                   <i class="fa-solid fa-microphone"></i>
                 </button>
                 <!-- Dummy Paperclip Attachment Option as requested -->

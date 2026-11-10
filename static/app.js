@@ -52,59 +52,67 @@ const bookingsTableContainer = document.getElementById("bookings-table-container
 const ledgerSearchInput = document.getElementById("ledger-search-input");
 const toastContainer = document.getElementById("toast-container");
 
-// Initialize on Load
-document.addEventListener("DOMContentLoaded", async () => {
-  await initializeChat();
+// Initialize immediately and also on DOMContentLoaded
+function setupAppListeners() {
   initVoiceFeatures();
 
-  // Attach Event Listeners
-  chatForm.addEventListener("submit", handleSendMessage);
-  btnNewChat.addEventListener("click", handleResetChat);
-  navBookingsLedger.addEventListener("click", openBookingsModal);
-  btnCloseModal.addEventListener("click", () => bookingsModal.classList.remove("open"));
+  if (chatForm) chatForm.onsubmit = handleSendMessage;
+  if (btnNewChat) btnNewChat.onclick = handleResetChat;
+  if (navBookingsLedger) navBookingsLedger.onclick = openBookingsModal;
+  if (btnCloseModal) btnCloseModal.onclick = () => bookingsModal.classList.remove("open");
   
-  // Close modal when clicking outside
-  bookingsModal.addEventListener("click", (e) => {
-    if (e.target === bookingsModal) bookingsModal.classList.remove("open");
-  });
-
-  // Dummy attachment handler
-  if (btnAttachDummy) {
-    btnAttachDummy.addEventListener("click", () => {
-      showToast("Attachment option is a demo dummy feature. Please type your details in chat.");
-    });
+  if (bookingsModal) {
+    bookingsModal.onclick = (e) => {
+      if (e.target === bookingsModal) bookingsModal.classList.remove("open");
+    };
   }
 
-  // Try an existing booking sample card
+  if (btnAttachDummy) {
+    btnAttachDummy.onclick = () => {
+      showToast("Attachment option is a demo dummy feature. Please type your details in chat.");
+    };
+  }
+
   if (cardTryBooking) {
-    cardTryBooking.addEventListener("click", () => {
+    cardTryBooking.onclick = () => {
       chatInput.value = "What is my booking details?";
       chatForm.dispatchEvent(new Event("submit"));
-    });
+    };
   }
 
-  // Input changes toggle send button state
-  chatInput.addEventListener("input", () => {
-    if (chatInput.value.trim().length > 0) {
-      btnSend.classList.add("active");
-    } else {
-      btnSend.classList.remove("active");
-    }
-  });
+  if (chatInput) {
+    chatInput.oninput = () => {
+      if (chatInput.value.trim().length > 0) {
+        btnSend.classList.add("active");
+      } else {
+        btnSend.classList.remove("active");
+      }
+    };
 
-  // Support Enter to submit (Shift+Enter for new line)
-  chatInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      chatForm.dispatchEvent(new Event("submit"));
-    }
-  });
+    chatInput.onkeydown = (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        chatForm.dispatchEvent(new Event("submit"));
+      }
+    };
+  }
 
-  // Live filter for bookings ledger
   if (ledgerSearchInput) {
-    ledgerSearchInput.addEventListener("input", filterBookingsTable);
+    ledgerSearchInput.oninput = filterBookingsTable;
   }
-});
+}
+
+// Call listeners immediately so buttons are active right away
+setupAppListeners();
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => {
+    setupAppListeners();
+    initializeChat();
+  });
+} else {
+  initializeChat();
+}
 
 // ==========================================================================
 // CHAT INITIALIZATION & MESSAGING
@@ -299,48 +307,61 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
 // ==========================================================================
 
 function initVoiceFeatures() {
-  if (btnVoiceRecord) {
-    btnVoiceRecord.addEventListener("click", () => {
-      if (isRecording) {
-        stopAndSendVoice();
-      } else {
-        startVoiceRecording();
-      }
-    });
-  }
+  const btnRec = document.getElementById("btn-voice-record");
+  const btnRestart = document.getElementById("btn-voice-restart");
+  const btnCancel = document.getElementById("btn-voice-cancel");
+  const btnStop = document.getElementById("btn-voice-stop");
+  const btnTts = document.getElementById("btn-toggle-tts");
 
-  if (btnVoiceRestart) {
-    btnVoiceRestart.addEventListener("click", restartVoiceRecording);
+  if (btnRec) {
+    btnRec.onclick = toggleVoiceRecording;
   }
-
-  if (btnVoiceCancel) {
-    btnVoiceCancel.addEventListener("click", cancelVoiceRecording);
+  if (btnRestart) {
+    btnRestart.onclick = restartVoiceRecording;
   }
-
-  if (btnVoiceStop) {
-    btnVoiceStop.addEventListener("click", stopAndSendVoice);
+  if (btnCancel) {
+    btnCancel.onclick = cancelVoiceRecording;
   }
-
-  if (btnToggleTts) {
-    btnToggleTts.addEventListener("click", () => {
-      ttsEnabled = !ttsEnabled;
-      if (ttsEnabled) {
-        btnToggleTts.classList.add("active-tts");
-        btnToggleTts.classList.remove("muted");
-        btnToggleTts.title = "Voice Audio Speech (TTS: ON)";
-        btnToggleTts.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
-        showToast("Voice Audio Speech enabled (ON)");
-      } else {
-        btnToggleTts.classList.remove("active-tts");
-        btnToggleTts.classList.add("muted");
-        btnToggleTts.title = "Voice Audio Speech (TTS: MUTED)";
-        btnToggleTts.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
-        stopCurrentAudio();
-        showToast("Voice Audio Speech muted (OFF)");
-      }
-    });
+  if (btnStop) {
+    btnStop.onclick = stopAndSendVoice;
+  }
+  if (btnTts) {
+    btnTts.onclick = toggleTTS;
   }
 }
+
+function toggleVoiceRecording() {
+  if (isRecording) {
+    stopAndSendVoice();
+  } else {
+    startVoiceRecording();
+  }
+}
+window.toggleVoiceRecording = toggleVoiceRecording;
+
+function toggleTTS() {
+  ttsEnabled = !ttsEnabled;
+  const btn = document.getElementById("btn-toggle-tts");
+  if (ttsEnabled) {
+    if (btn) {
+      btn.classList.add("active-tts");
+      btn.classList.remove("muted");
+      btn.title = "Voice Audio Speech (TTS: ON)";
+      btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+    }
+    showToast("Voice Audio Speech enabled (ON)");
+  } else {
+    if (btn) {
+      btn.classList.remove("active-tts");
+      btn.classList.add("muted");
+      btn.title = "Voice Audio Speech (TTS: MUTED)";
+      btn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+    }
+    stopCurrentAudio();
+    showToast("Voice Audio Speech muted (OFF)");
+  }
+}
+window.toggleTTS = toggleTTS;
 
 function initMediaRecorder(stream) {
   let options = {};
@@ -416,56 +437,64 @@ function stopAudioVisualizer() {
   });
 }
 
-async function startVoiceRecording() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showToast("Microphone access is not supported by your browser.");
-    return;
-  }
+function startVoiceRecording() {
+  isRecording = true;
+  audioChunks = [];
+  recordingSeconds = 0;
 
-  try {
-    currentMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioChunks = [];
+  // 1. IMMEDIATELY switch UI: show recording overlay and hide chat form
+  const overlay = document.getElementById("voice-recording-overlay");
+  const form = document.getElementById("chat-form");
+  const btnRec = document.getElementById("btn-voice-record");
 
-    initMediaRecorder(currentMediaStream);
-    mediaRecorder.start(200);
-    isRecording = true;
+  if (overlay) overlay.style.display = "flex";
+  if (form) form.style.display = "none";
+  if (btnRec) btnRec.classList.add("recording-active");
 
-    // UI Updates: switch to voice recording overlay
-    if (voiceRecordingOverlay) voiceRecordingOverlay.style.display = "flex";
-    if (chatForm) chatForm.style.display = "none";
-    if (btnVoiceRecord) btnVoiceRecord.classList.add("recording-active");
+  updateTimerDisplay();
 
-    recordingSeconds = 0;
+  // 2. Start timer ticking every second
+  if (recordingTimerInterval) clearInterval(recordingTimerInterval);
+  recordingTimerInterval = setInterval(() => {
+    recordingSeconds++;
     updateTimerDisplay();
+    if (recordingSeconds >= 90) {
+      stopAndSendVoice();
+    }
+  }, 1000);
 
-    if (recordingTimerInterval) clearInterval(recordingTimerInterval);
-    recordingTimerInterval = setInterval(() => {
-      recordingSeconds++;
-      updateTimerDisplay();
-      if (recordingSeconds >= 90) {
-        stopAndSendVoice();
-      }
-    }, 1000);
-
-    // Live wave visualizer
-    startAudioVisualizer(currentMediaStream);
-
-  } catch (err) {
-    console.error("Microphone access error:", err);
-    showToast("Could not access microphone. Please allow microphone permission in your browser.");
-    cleanupRecordingUI();
+  // 3. Request microphone access and attach real-time visualizer
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        if (!isRecording) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+        currentMediaStream = stream;
+        initMediaRecorder(stream);
+        try {
+          mediaRecorder.start(200);
+        } catch (e) {
+          console.warn("MediaRecorder start error:", e);
+        }
+        startAudioVisualizer(stream);
+      })
+      .catch(err => {
+        console.warn("Microphone access prompt or error:", err);
+        showToast("Microphone note: " + (err.message || "Please allow microphone permission. Audio visualizer is running."));
+      });
+  } else {
+    showToast("Microphone requires HTTPS or localhost. Recording studio is active.");
   }
 }
+window.startVoiceRecording = startVoiceRecording;
 
 function restartVoiceRecording() {
-  if (!currentMediaStream || !isRecording) return;
-
-  // 1. Reset timer & chunks
   recordingSeconds = 0;
   updateTimerDisplay();
   audioChunks = [];
 
-  // 2. Re-instantiate mediaRecorder on active stream to clear audio buffers cleanly
   if (mediaRecorder) {
     mediaRecorder.onstop = null;
     mediaRecorder.ondataavailable = null;
@@ -476,21 +505,25 @@ function restartVoiceRecording() {
     } catch (e) {}
   }
 
-  initMediaRecorder(currentMediaStream);
-  try {
-    mediaRecorder.start(200);
-  } catch (e) {
-    console.warn("Error restarting MediaRecorder:", e);
+  if (currentMediaStream) {
+    initMediaRecorder(currentMediaStream);
+    try {
+      mediaRecorder.start(200);
+    } catch (e) {
+      console.warn("Error restarting MediaRecorder:", e);
+    }
   }
 
   showToast("Recording restarted from 0:00. Speak now...");
 }
+window.restartVoiceRecording = restartVoiceRecording;
 
 function updateTimerDisplay() {
-  if (!voiceTimer) return;
+  const timerElem = document.getElementById("voice-timer");
+  if (!timerElem) return;
   const mins = Math.floor(recordingSeconds / 60);
   const secs = recordingSeconds % 60;
-  voiceTimer.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  timerElem.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
 function cleanupRecordingUI() {
@@ -500,9 +533,14 @@ function cleanupRecordingUI() {
     recordingTimerInterval = null;
   }
   stopAudioVisualizer();
-  if (btnVoiceRecord) btnVoiceRecord.classList.remove("recording-active");
-  if (voiceRecordingOverlay) voiceRecordingOverlay.style.display = "none";
-  if (chatForm) chatForm.style.display = "";
+
+  const overlay = document.getElementById("voice-recording-overlay");
+  const form = document.getElementById("chat-form");
+  const btnRec = document.getElementById("btn-voice-record");
+
+  if (btnRec) btnRec.classList.remove("recording-active");
+  if (overlay) overlay.style.display = "none";
+  if (form) form.style.display = "";
 }
 
 function cancelVoiceRecording() {
@@ -520,38 +558,54 @@ function cancelVoiceRecording() {
   cleanupRecordingUI();
   showToast("Voice recording cancelled.");
 }
+window.cancelVoiceRecording = cancelVoiceRecording;
 
 async function stopAndSendVoice() {
-  if (!mediaRecorder || mediaRecorder.state === "inactive" || !isRecording) return;
+  if (!isRecording) return;
 
   stopAudioVisualizer();
 
-  mediaRecorder.onstop = async () => {
-    if (currentMediaStream) {
-      currentMediaStream.getTracks().forEach(track => track.stop());
-      currentMediaStream = null;
-    }
-
-    if (audioChunks.length === 0) {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.onstop = async () => {
+      if (currentMediaStream) {
+        currentMediaStream.getTracks().forEach(track => track.stop());
+        currentMediaStream = null;
+      }
       cleanupRecordingUI();
-      showToast("No voice audio was captured. Please try speaking again.");
+
+      if (audioChunks.length === 0) {
+        showToast("No voice audio was captured. Please speak into your microphone and try again.");
+        return;
+      }
+
+      const mime = mediaRecorder.mimeType || "audio/webm";
+      const audioBlob = new Blob(audioChunks, { type: mime });
+      await processVoiceAudioBlob(audioBlob);
+    };
+
+    try {
+      mediaRecorder.stop();
       return;
+    } catch (e) {
+      console.warn("Error stopping media recorder:", e);
     }
+  }
 
-    const mime = mediaRecorder.mimeType || "audio/webm";
-    const audioBlob = new Blob(audioChunks, { type: mime });
-    cleanupRecordingUI();
+  // Fallback if mediaRecorder was not running
+  if (currentMediaStream) {
+    currentMediaStream.getTracks().forEach(track => track.stop());
+    currentMediaStream = null;
+  }
+  cleanupRecordingUI();
 
+  if (audioChunks && audioChunks.length > 0) {
+    const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
     await processVoiceAudioBlob(audioBlob);
-  };
-
-  try {
-    mediaRecorder.stop();
-  } catch (e) {
-    console.warn("Error stopping media recorder:", e);
-    cleanupRecordingUI();
+  } else {
+    showToast("No voice recorded. Please allow microphone access to talk with AI.");
   }
 }
+window.stopAndSendVoice = stopAndSendVoice;
 
 async function processVoiceAudioBlob(blob) {
   showTyping(true);
@@ -623,9 +677,13 @@ function playAudio(audioDataUri, onEndCallback = null) {
     };
     currentAudioPlayer.play().catch(err => {
       console.warn("Autoplay was prevented by browser policy:", err);
+      currentAudioPlayer = null;
+      if (onEndCallback) onEndCallback();
     });
   } catch (e) {
     console.warn("playAudio failed:", e);
+    currentAudioPlayer = null;
+    if (onEndCallback) onEndCallback();
   }
 }
 
