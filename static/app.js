@@ -659,6 +659,9 @@ async function stopAndSendVoice() {
     };
 
     try {
+      if (mediaRecorder.state === "recording") {
+        mediaRecorder.requestData();
+      }
       mediaRecorder.stop();
       return;
     } catch (e) {

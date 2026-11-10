@@ -40,10 +40,16 @@ def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm") -> str:
             tmp_path = tmp.name
 
         model = get_whisper_model("tiny")
-        # fp16=False is essential for CPU inference
-        result = model.transcribe(tmp_path, fp16=False, language="en")
+        # fp16=False is essential for CPU inference; temperature=0.0 gives most deterministic, accurate transcription
+        result = model.transcribe(
+            tmp_path,
+            fp16=False,
+            language="en",
+            temperature=0.0,
+            condition_on_previous_text=False
+        )
         text = (result.get("text") or "").strip()
-        logger.info(f"Whisper transcribed ({len(audio_bytes)} bytes) -> '{text}'")
+        logger.info(f"Whisper transcribed ({len(audio_bytes)} bytes, ext={ext}) -> '{text}'")
         return text
     except Exception as e:
         logger.error(f"Whisper transcription error: {e}", exc_info=True)
