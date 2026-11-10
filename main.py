@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, File, UploadFile, Form, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,9 +12,11 @@ from config import settings
 from database import db_manager
 from ollama_client import ollama_client
 from booking_agent import booking_agent, STEP_START, STEP_ASK_LOCATION
+import voice_service
 from models import (
     ChatRequest, ChatResponse, ResetRequest,
-    LocationModel, HotelModel, RoomModel, RoomCountUpdateRequest, AvailabilityCheckRequest
+    LocationModel, HotelModel, RoomModel, RoomCountUpdateRequest, AvailabilityCheckRequest,
+    VoiceChatResponse, TTSRequest
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -165,12 +167,107 @@ async def initialize_chat(request: ResetRequest):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_message(req: ChatRequest):
-    """Process user message through conversational booking agent."""
+    """Process user message through conversational booking agent and include TTS audio."""
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     result = await booking_agent.process_user_message(req.session_id, req.message)
+    # Generate TTS audio for the reply so frontend can speak at the same time
+    try:
+        reply_text = result.get("reply", "")
+        result["audio_base64"] = voice_service.generate_tts_data_uri(reply_text)
+    except Exception as e:
+        logger.warning(f"Failed to generate TTS audio in /api/chat: {e}")
+        result["audio_base64"] = None
     return ChatResponse(**result)
+
+# ==============================================================
+# VOICE SPEECH-TO-TEXT (WHISPER) & TEXT-TO-SPEECH (TTS) ENDPOINTS
+# ==============================================================
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(audio: UploadFile = File(...)):
+    """Transcribe user-recorded voice audio using Whisper 'tiny' CPU model."""
+    try:
+        content = await audio.read()
+        filename = audio.filename or "recording.webm"
+        ext = filename.split(".")[-1] if "." in filename else "webm"
+        text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
+        return {"success": True, "text": text}
+    except Exception as e:
+        logger.error(f"Voice transcription endpoint error: {e}", exc_info=True)
+        return {"success": False, "text": "", "error": str(e)}
+
+@app.post("/api/voice/chat", response_model=VoiceChatResponse)
+async def voice_chat(
+    audio: UploadFile = File(...),
+    session_id: Optional[str] = Form(None)
+):
+    """
+    1. Transcribe voice input using Whisper 'tiny' CPU model.
+    2. Process transcribed message through booking agent.
+    3. Generate TTS audio for the reply so frontend speaks immediately.
+    """
+    try:
+        content = await audio.read()
+        filename = audio.filename or "recording.webm"
+        ext = filename.split(".")[-1] if "." in filename else "webm"
+        user_text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
+
+        if not user_text:
+            return VoiceChatResponse(
+                success=False,
+                message="No clear speech detected. Please speak into your microphone and try again.",
+                session_id=session_id or ""
+            )
+
+        # Process through booking conversational agent
+        result = await booking_agent.process_user_message(session_id, user_text)
+
+        # Generate TTS audio for the reply text
+        reply_text = result.get("reply", "")
+        audio_base64 = voice_service.generate_tts_data_uri(reply_text)
+
+        return VoiceChatResponse(
+            success=True,
+            user_text=user_text,
+            reply=reply_text,
+            session_id=result.get("session_id", ""),
+            current_step=result.get("current_step", ""),
+            state=result.get("state", {}),
+            quick_replies=result.get("quick_replies", []),
+            booking=result.get("booking"),
+            options=result.get("options"),
+            audio_base64=audio_base64
+        )
+    except Exception as e:
+        logger.error(f"Voice chat endpoint error: {e}", exc_info=True)
+        return VoiceChatResponse(
+            success=False,
+            message=f"Error processing voice: {e}",
+            session_id=session_id or ""
+        )
+
+@app.post("/api/voice/tts")
+async def tts_endpoint_post(req: TTSRequest):
+    """Generate and return MP3 audio for any given text."""
+    try:
+        audio_bytes = voice_service.generate_tts_audio_bytes(req.text)
+        if not audio_bytes:
+            raise HTTPException(status_code=500, detail="Failed to synthesize speech audio")
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/voice/tts")
+async def tts_endpoint_get(text: str = Query(..., description="Text to synthesize to speech")):
+    """GET endpoint to play or stream MP3 speech directly."""
+    try:
+        audio_bytes = voice_service.generate_tts_audio_bytes(text)
+        if not audio_bytes:
+            raise HTTPException(status_code=500, detail="Failed to synthesize speech audio")
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/chat/reset")
 async def reset_chat(req: ResetRequest):

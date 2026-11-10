@@ -14,6 +14,23 @@ class ChatResponse(BaseModel):
     quick_replies: List[str] = []
     booking: Optional[Dict[str, Any]] = None
     options: Optional[Dict[str, Any]] = None
+    audio_base64: Optional[str] = None
+
+class VoiceChatResponse(BaseModel):
+    success: bool
+    user_text: str = ""
+    reply: str = ""
+    session_id: str = ""
+    current_step: str = ""
+    state: Dict[str, Any] = {}
+    quick_replies: List[str] = []
+    booking: Optional[Dict[str, Any]] = None
+    options: Optional[Dict[str, Any]] = None
+    audio_base64: Optional[str] = None
+    message: Optional[str] = None
+
+class TTSRequest(BaseModel):
+    text: str
 
 class ResetRequest(BaseModel):
     session_id: Optional[str] = None

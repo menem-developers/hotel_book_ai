@@ -102,6 +102,9 @@
             <span class="dot-indicator"></span>
             <span>LIVE DEMO</span>
           </div>
+          <button class="icon-circle-btn active-tts" id="btn-toggle-tts" title="Voice Audio Speech (TTS: ON)">
+            <i class="fa-solid fa-volume-high"></i>
+          </button>
           <button class="icon-circle-btn" id="btn-help-faq" title="Help & System Info">
             <i class="fa-regular fa-circle-question"></i>
           </button>
@@ -157,6 +160,10 @@
             
             <div class="input-bottom-bar">
               <div class="input-tools-left">
+                <!-- Record / Mic Voice Button -->
+                <button type="button" class="btn-tool-icon btn-mic" id="btn-voice-record" title="Record Voice (Speak to Assistant)">
+                  <i class="fa-solid fa-microphone"></i>
+                </button>
                 <!-- Dummy Paperclip Attachment Option as requested -->
                 <button type="button" class="btn-tool-icon" id="btn-attach-dummy" title="Attach file (Demo)">
                   <i class="fa-solid fa-paperclip"></i>
@@ -165,10 +172,26 @@
                   <i class="fa-solid fa-shield-halved"></i>
                   <span>Secure conversation</span>
                 </div>
-                <span class="channel-tag">Text channel</span>
+                <span class="channel-tag" id="channel-tag">Voice & Text</span>
               </div>
 
               <div class="input-tools-right">
+                <!-- Active Voice Recording Control Bar -->
+                <div class="voice-recording-bar" id="voice-recording-bar" style="display: none;">
+                  <span class="voice-pulse-dot"></span>
+                  <span class="voice-status-text">Listening...</span>
+                  <span class="voice-timer" id="voice-timer">0:00</span>
+                  <div class="voice-wave-anim">
+                    <span></span><span></span><span></span><span></span>
+                  </div>
+                  <button type="button" class="btn-voice-cancel" id="btn-voice-cancel" title="Cancel recording">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                  </button>
+                  <button type="button" class="btn-voice-ok" id="btn-voice-ok" title="Finish and Send">
+                    <i class="fa-solid fa-check"></i> OK
+                  </button>
+                </div>
+
                 <button type="submit" class="btn-send-arrow" id="btn-send" title="Send message">
                   <i class="fa-solid fa-arrow-up"></i>
                 </button>
