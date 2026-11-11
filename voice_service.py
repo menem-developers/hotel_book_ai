@@ -1,6 +1,7 @@
 import os
 import io
 import re
+import shutil
 import base64
 import tempfile
 import logging
@@ -15,6 +16,11 @@ logger = logging.getLogger("voice_service")
 DEFAULT_TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AriaNeural")
 
 _whisper_model = None
+
+def is_ffmpeg_installed() -> bool:
+    """Check if ffmpeg executable is available in system PATH."""
+    return shutil.which("ffmpeg") is not None
+
 
 def get_whisper_model(model_name: str = "tiny"):
     """
@@ -61,6 +67,15 @@ def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm") -> str:
     """
     if not audio_bytes or len(audio_bytes) < 100:
         logger.warning(f"Transcribe received empty or tiny audio: {len(audio_bytes) if audio_bytes else 0} bytes")
+        return ""
+
+    if not is_ffmpeg_installed():
+        logger.error(
+            "CRITICAL: 'ffmpeg' is not installed or not in PATH! "
+            "OpenAI Whisper requires ffmpeg to decode audio files. "
+            "On Ubuntu run: 'sudo apt-get update && sudo apt-get install -y ffmpeg' "
+            "or ensure your Docker container installs ffmpeg."
+        )
         return ""
 
     ext = file_ext.lstrip(".") if file_ext else "webm"

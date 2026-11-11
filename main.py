@@ -113,6 +113,10 @@ async def get_system_status():
             "connected": ollama_ok,
             "host": settings.OLLAMA_HOST,
             "model": settings.OLLAMA_MODEL
+        },
+        "voice": {
+            "ffmpeg_installed": voice_service.is_ffmpeg_installed(),
+            "tts_voice": settings.TTS_VOICE
         }
     }
 
@@ -193,6 +197,12 @@ async def voice_transcribe(audio: UploadFile = File(...)):
         ext = filename.split(".")[-1] if "." in filename else "webm"
         logger.info(f"[/api/voice/transcribe] Received {len(content)} bytes, filename={filename}")
         text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
+        if not text and not voice_service.is_ffmpeg_installed():
+            return {
+                "success": False,
+                "text": "",
+                "error": "Server error: 'ffmpeg' is not installed on this Ubuntu system. Please run 'sudo apt-get install -y ffmpeg'."
+            }
         return {"success": True, "text": text}
     except Exception as e:
         logger.error(f"Voice transcription endpoint error: {e}", exc_info=True)
@@ -216,6 +226,13 @@ async def voice_chat(
         user_text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
 
         if not user_text:
+            if not voice_service.is_ffmpeg_installed():
+                logger.error("[/api/voice/chat] ffmpeg is not installed on this server!")
+                return VoiceChatResponse(
+                    success=False,
+                    message="Server error: 'ffmpeg' is not installed on this Ubuntu server. Please run 'sudo apt-get update && sudo apt-get install -y ffmpeg'.",
+                    session_id=session_id or ""
+                )
             logger.warning(f"[/api/voice/chat] No speech detected in {len(content)} bytes audio")
             return VoiceChatResponse(
                 success=False,
