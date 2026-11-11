@@ -191,6 +191,7 @@ async def voice_transcribe(audio: UploadFile = File(...)):
         content = await audio.read()
         filename = audio.filename or "recording.webm"
         ext = filename.split(".")[-1] if "." in filename else "webm"
+        logger.info(f"[/api/voice/transcribe] Received {len(content)} bytes, filename={filename}")
         text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
         return {"success": True, "text": text}
     except Exception as e:
@@ -211,9 +212,11 @@ async def voice_chat(
         content = await audio.read()
         filename = audio.filename or "recording.webm"
         ext = filename.split(".")[-1] if "." in filename else "webm"
+        logger.info(f"[/api/voice/chat] Received audio upload: {len(content)} bytes, filename={filename}")
         user_text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
 
         if not user_text:
+            logger.warning(f"[/api/voice/chat] No speech detected in {len(content)} bytes audio")
             return VoiceChatResponse(
                 success=False,
                 message="No clear speech detected. Please speak into your microphone and try again.",

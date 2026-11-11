@@ -37,6 +37,7 @@ let currentAudioPlayer = null;
 let audioContext = null;
 let audioAnalyser = null;
 let audioVisualizerFrame = null;
+let maxAudioVolume = 0;
 
 // Sidebar Nav Elements
 const btnNewChat = document.getElementById("btn-new-chat");
@@ -394,9 +395,13 @@ function startAudioVisualizer(stream) {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
     audioContext = new AudioCtx();
+    if (audioContext.state === "suspended") {
+      audioContext.resume().catch(() => {});
+    }
     const source = audioContext.createMediaStreamSource(stream);
     audioAnalyser = audioContext.createAnalyser();
     audioAnalyser.fftSize = 64;
+    audioAnalyser.smoothingTimeConstant = 0.4;
     source.connect(audioAnalyser);
 
     const bufferLength = audioAnalyser.frequencyBinCount;
@@ -408,12 +413,22 @@ function startAudioVisualizer(stream) {
       audioVisualizerFrame = requestAnimationFrame(renderWaves);
       audioAnalyser.getByteFrequencyData(dataArray);
 
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const avg = sum / bufferLength;
+      if (avg > maxAudioVolume) {
+        maxAudioVolume = avg;
+      }
+
       bars.forEach((bar, index) => {
         const binIndex = Math.floor((index / bars.length) * (bufferLength / 2));
         const val = dataArray[binIndex] || 0;
-        const height = Math.max(6, Math.min(34, Math.round((val / 255) * 34)));
+        // Dynamically scale height from 6px up to 36px based on real speech energy
+        const height = Math.max(6, Math.min(36, Math.round(6 + (val / 160) * 30)));
         bar.style.height = `${height}px`;
-        bar.style.opacity = (0.4 + (val / 255) * 0.6).toFixed(2);
+        bar.style.opacity = Math.max(0.35, Math.min(1.0, 0.35 + (val / 150) * 0.65)).toFixed(2);
       });
     }
 
@@ -504,48 +519,77 @@ async function startVoiceRecording() {
     return;
   }
 
-  // 2. Open recording overlay UI immediately
+  // 2. Open recording overlay UI with Connecting state
   isRecording = true;
   audioChunks = [];
   recordingSeconds = 0;
+  maxAudioVolume = 0;
 
   const overlay = document.getElementById("voice-recording-overlay");
   const form = document.getElementById("chat-form");
   const btnRec = document.getElementById("btn-voice-record");
+  const recBadge = document.getElementById("voice-rec-badge");
+  const statusText = document.getElementById("voice-rec-status-text");
 
-  if (overlay) overlay.style.display = "flex";
+  if (overlay) {
+    overlay.style.display = "flex";
+    overlay.classList.remove("live-active");
+  }
   if (form) form.style.display = "none";
   if (btnRec) btnRec.classList.add("recording-active");
+  if (recBadge) recBadge.classList.add("connecting");
+  if (statusText) statusText.textContent = "Connecting mic...";
 
   updateTimerDisplay();
 
-  // 3. Start timer
-  if (recordingTimerInterval) clearInterval(recordingTimerInterval);
-  recordingTimerInterval = setInterval(() => {
-    recordingSeconds++;
-    updateTimerDisplay();
-    if (recordingSeconds >= 90) {
-      stopAndSendVoice();
-    }
-  }, 1000);
+  // 3. Request microphone access with tuned speech constraints
+  const audioConstraints = {
+    channelCount: 1,
+    sampleRate: { ideal: 16000 },
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  };
 
-  // 4. Request microphone access (this automatically pops up the browser's native permission dialog!)
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     if (!isRecording) {
-      // If user cancelled while the permission dialog was open
+      // User cancelled before mic stream opened
       stream.getTracks().forEach(t => t.stop());
       return;
     }
     currentMediaStream = stream;
     initMediaRecorder(stream);
+    
+    // Gather audio slices every 100ms
     try {
-      mediaRecorder.start(200);
+      mediaRecorder.start(100);
     } catch (e) {
       console.warn("MediaRecorder start error:", e);
+      mediaRecorder.start();
     }
+
+    // Microphone is now actively recording
+    if (overlay) overlay.classList.add("live-active");
+    if (recBadge) {
+      recBadge.classList.remove("connecting");
+      recBadge.classList.remove("processing");
+    }
+    if (statusText) statusText.textContent = "REC (Speak now)";
+
     startAudioVisualizer(stream);
     closeMicPermissionModal();
+
+    // Start timer only when microphone hardware is live
+    if (recordingTimerInterval) clearInterval(recordingTimerInterval);
+    recordingTimerInterval = setInterval(() => {
+      recordingSeconds++;
+      updateTimerDisplay();
+      if (recordingSeconds >= 90) {
+        stopAndSendVoice();
+      }
+    }, 1000);
+
   } catch (err) {
     console.warn("Microphone access error:", err);
     cleanupRecordingUI();
@@ -567,6 +611,7 @@ window.startVoiceRecording = startVoiceRecording;
 
 function restartVoiceRecording() {
   recordingSeconds = 0;
+  maxAudioVolume = 0;
   updateTimerDisplay();
   audioChunks = [];
 
@@ -583,7 +628,7 @@ function restartVoiceRecording() {
   if (currentMediaStream) {
     initMediaRecorder(currentMediaStream);
     try {
-      mediaRecorder.start(200);
+      mediaRecorder.start(100);
     } catch (e) {
       console.warn("Error restarting MediaRecorder:", e);
     }
@@ -612,10 +657,20 @@ function cleanupRecordingUI() {
   const overlay = document.getElementById("voice-recording-overlay");
   const form = document.getElementById("chat-form");
   const btnRec = document.getElementById("btn-voice-record");
+  const recBadge = document.getElementById("voice-rec-badge");
+  const statusText = document.getElementById("voice-rec-status-text");
 
   if (btnRec) btnRec.classList.remove("recording-active");
-  if (overlay) overlay.style.display = "none";
+  if (overlay) {
+    overlay.style.display = "none";
+    overlay.classList.remove("live-active");
+  }
   if (form) form.style.display = "";
+  if (recBadge) {
+    recBadge.classList.remove("connecting");
+    recBadge.classList.remove("processing");
+  }
+  if (statusText) statusText.textContent = "REC";
 }
 
 function cancelVoiceRecording() {
@@ -638,6 +693,11 @@ window.cancelVoiceRecording = cancelVoiceRecording;
 async function stopAndSendVoice() {
   if (!isRecording) return;
 
+  const recBadge = document.getElementById("voice-rec-badge");
+  const statusText = document.getElementById("voice-rec-status-text");
+  if (recBadge) recBadge.classList.add("processing");
+  if (statusText) statusText.textContent = "Processing speech...";
+
   stopAudioVisualizer();
 
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
@@ -648,9 +708,14 @@ async function stopAndSendVoice() {
       }
       cleanupRecordingUI();
 
-      if (audioChunks.length === 0) {
-        showToast("No voice audio was captured. Please speak into your microphone and try again.");
+      const totalBytes = audioChunks.reduce((acc, c) => acc + (c.size || 0), 0);
+      if (audioChunks.length === 0 || totalBytes < 400) {
+        showToast("Recording was too short. Please speak clearly into your mic and try again.");
         return;
+      }
+
+      if (maxAudioVolume < 3) {
+        showToast("Low or no microphone sound was detected. Please verify your mic is unmuted and speak clearly.");
       }
 
       const mime = mediaRecorder.mimeType || "audio/webm";
@@ -659,9 +724,6 @@ async function stopAndSendVoice() {
     };
 
     try {
-      if (mediaRecorder.state === "recording") {
-        mediaRecorder.requestData();
-      }
       mediaRecorder.stop();
       return;
     } catch (e) {
