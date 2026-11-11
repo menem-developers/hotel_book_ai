@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
 # Copy application code into container
 COPY . /app
 
+
 # Create uploads directory
 RUN mkdir -p /app/uploads
 
