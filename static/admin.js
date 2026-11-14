@@ -2,6 +2,11 @@
 // GRAND AZURE CONTROL PANEL & INVENTORY MANAGEMENT
 // ==============================================================
 
+// Auth Check: Redirect to login if unauthenticated
+if (!localStorage.getItem("northstar_auth_token")) {
+  window.location.replace("/?redirect=/admin");
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   // Set default dates for the availability tester
   const today = new Date();

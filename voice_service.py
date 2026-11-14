@@ -15,11 +15,53 @@ logger = logging.getLogger("voice_service")
 # Default female neural voice: natural, polite, realistic American English assistant
 DEFAULT_TTS_VOICE = os.getenv("TTS_VOICE", "en-US-AriaNeural")
 
+# Multilingual Neural Voice Map for Edge TTS
+VOICE_MAP = {
+    "en": os.getenv("TTS_VOICE", "en-US-AriaNeural"),
+    "hi": "hi-IN-SwaraNeural",
+    "es": "es-ES-ElviraNeural"
+}
+
+# Domain-tuned initial prompts for Whisper STT (concise to prevent token loops)
+WHISPER_PROMPTS = {
+    "en": "Hotel booking reservation, rooms, guests, dates, check-in, check-out, Mumbai, Delhi, New York.",
+    "hi": None,
+    "es": "Reserva de hotel, habitaciones, huéspedes, fechas, check-in, check-out, Madrid, Barcelona."
+}
+
+# Multilingual STT Language Locale Map
+STT_LOCALE_MAP = {
+    "en": "en-US",
+    "hi": "hi-IN",
+    "es": "es-ES"
+}
+
 _whisper_model = None
 
 def is_ffmpeg_installed() -> bool:
     """Check if ffmpeg executable is available in system PATH."""
     return shutil.which("ffmpeg") is not None
+
+
+def _transcribe_with_google_stt(wav_path: str, locale: str = "en-US") -> Optional[str]:
+    """
+    Transcribe 16kHz mono WAV using Google Speech Recognition API.
+    Provides fast (~1s), near-perfect accuracy in Hindi (Devanagari script), Spanish, and English.
+    """
+    try:
+        import speech_recognition as sr
+        r = sr.Recognizer()
+        r.energy_threshold = 280
+        r.dynamic_energy_threshold = True
+        with sr.AudioFile(wav_path) as source:
+            audio = r.record(source)
+        text = r.recognize_google(audio, language=locale)
+        if text and text.strip():
+            logger.info(f"Google STT ({locale}) successfully transcribed: '{text.strip()}'")
+            return text.strip()
+    except Exception as e:
+        logger.warning(f"Google STT ({locale}) notice: {e}. Falling back to Whisper...")
+    return None
 
 
 def get_whisper_model(model_name: str = "tiny"):
@@ -59,9 +101,9 @@ def _normalize_audio_to_wav(input_path: str) -> str:
     return input_path
 
 
-def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm") -> str:
+def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm", language: str = "en") -> str:
     """
-    Transcribe raw audio bytes using Whisper CPU model.
+    Transcribe raw audio bytes using Whisper CPU model in the requested language (en, hi, es).
     Supports webm, wav, mp3, ogg, etc.
     Automatically normalizes browser WebM to 16kHz mono WAV for high speech recognition accuracy.
     """
@@ -79,6 +121,10 @@ def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm") -> str:
         return ""
 
     ext = file_ext.lstrip(".") if file_ext else "webm"
+    target_lang = (language or "en").lower().strip()
+    if target_lang not in ("en", "hi", "es"):
+        target_lang = "en"
+
     tmp_path = None
     target_path = None
     try:
@@ -89,31 +135,42 @@ def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm") -> str:
         # Normalize to pristine 16kHz mono WAV using ffmpeg
         target_path = _normalize_audio_to_wav(tmp_path)
 
+        # 1. Primary STT Engine: Google Speech Recognition (Super-accurate in Hindi Devanagari, Spanish, English)
+        stt_locale = STT_LOCALE_MAP.get(target_lang, "en-US")
+        google_text = _transcribe_with_google_stt(target_path, locale=stt_locale)
+        if google_text:
+            logger.info(f"STT primary (Google STT, lang={target_lang}, locale={stt_locale}) -> '{google_text}'")
+            return google_text
+
+        # 2. Secondary STT Fallback Engine: OpenAI Whisper (Local CPU model)
+        logger.info(f"Google STT returned empty or unavailable, engaging Whisper fallback for lang={target_lang}...")
         model = get_whisper_model("tiny")
         
-        # Primary pass: English with tuned thresholds and initial prompt for hotel domain
+        # Primary pass: specified language with tuned thresholds and domain prompt
         decode_opts = {
             "fp16": False,
-            "language": "en",
-            "temperature": (0.0, 0.2, 0.4),
+            "language": target_lang,
+            "temperature": (0.0, 0.2),
             "no_speech_threshold": 0.85,
             "logprob_threshold": -1.5,
-            "condition_on_previous_text": False,
-            "initial_prompt": "Hotel booking reservation, rooms, guests, dates, check-in, check-out, Mumbai, Delhi, Bangalore, Goa."
+            "condition_on_previous_text": False
         }
+        init_prompt = WHISPER_PROMPTS.get(target_lang)
+        if init_prompt:
+            decode_opts["initial_prompt"] = init_prompt
 
         result = model.transcribe(target_path, **decode_opts)
         text = (result.get("text") or "").strip()
 
-        # If primary English pass returned empty, attempt second pass with auto-detect language
+        # If primary language pass returned empty, attempt second pass with auto-detect language
         if not text:
-            logger.info("Primary English pass returned empty, attempting auto-detect language pass...")
+            logger.info(f"Primary pass ({target_lang}) returned empty, attempting auto-detect language pass...")
             decode_opts["language"] = None
             decode_opts["no_speech_threshold"] = 0.90
             result = model.transcribe(target_path, **decode_opts)
             text = (result.get("text") or "").strip()
 
-        logger.info(f"Whisper transcribed ({len(audio_bytes)} raw bytes, file={target_path}) -> '{text}'")
+        logger.info(f"Whisper transcribed ({len(audio_bytes)} raw bytes, lang={target_lang}, file={target_path}) -> '{text}'")
         return text
     except Exception as e:
         logger.error(f"Whisper transcription error: {e}", exc_info=True)
@@ -187,13 +244,15 @@ def _run_coroutine_safely(coro):
 async def _synthesize_edge_tts_async(text: str, voice: str) -> bytes:
     """
     Synthesize natural neural speech using edge-tts (no local GPU/heavy model required).
+    Protected with a 10-second timeout to promptly trigger fallback if network hangs.
     """
     import edge_tts
     communicate = edge_tts.Communicate(text=text, voice=voice)
     chunks = []
-    async for chunk in communicate.stream():
-        if chunk.get("type") == "audio":
-            chunks.append(chunk.get("data", b""))
+    async with asyncio.timeout(10.0):
+        async for chunk in communicate.stream():
+            if chunk.get("type") == "audio":
+                chunks.append(chunk.get("data", b""))
     return b"".join(chunks)
 
 
@@ -214,26 +273,32 @@ def _synthesize_gtts(text: str, lang: str = "en") -> Optional[bytes]:
 
 async def generate_tts_audio_bytes_async(text: str, voice: Optional[str] = None, lang: str = "en") -> Optional[bytes]:
     """
-    Asynchronously generate natural neural MP3 audio bytes.
-    Defaults to realistic female voice (en-US-AriaNeural) with automatic gTTS fallback.
+    Asynchronously generate natural neural MP3 audio bytes in the requested language (en, hi, es).
+    Defaults to realistic female voice for the selected language:
+    - English: en-US-AriaNeural
+    - Hindi: hi-IN-SwaraNeural
+    - Spanish: es-ES-ElviraNeural
+    with automatic gTTS fallback.
     """
     cleaned = clean_text_for_speech(text)
     if not cleaned:
         cleaned = "Thank you."
 
-    target_voice = voice or DEFAULT_TTS_VOICE
+    lang_code = (lang or "en").lower().strip()
+    target_voice = voice or VOICE_MAP.get(lang_code, DEFAULT_TTS_VOICE)
+    fallback_lang = lang_code if lang_code in ("en", "hi", "es") else "en"
 
-    # 1. Primary: Natural Edge Neural Voice (Female)
+    # 1. Primary: Natural Edge Neural Voice
     try:
         audio_bytes = await _synthesize_edge_tts_async(cleaned, target_voice)
         if audio_bytes and len(audio_bytes) > 200:
             return audio_bytes
     except Exception as e:
-        logger.warning(f"Edge Neural TTS failed ({e}), attempting fallback to gTTS...")
+        logger.warning(f"Edge Neural TTS failed for '{target_voice}' ({e}), attempting fallback to gTTS...")
 
     # 2. Secondary fallback: gTTS
     try:
-        return await asyncio.to_thread(_synthesize_gtts, cleaned, lang)
+        return await asyncio.to_thread(_synthesize_gtts, cleaned, fallback_lang)
     except Exception as e:
         logger.error(f"TTS fallback also failed: {e}")
         return None

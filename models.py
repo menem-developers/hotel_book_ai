@@ -2,9 +2,21 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    success: bool
+    token: Optional[str] = None
+    username: Optional[str] = None
+    role: Optional[str] = None
+    message: Optional[str] = None
+
 class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
+    language: Optional[str] = "en"
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -15,6 +27,7 @@ class ChatResponse(BaseModel):
     booking: Optional[Dict[str, Any]] = None
     options: Optional[Dict[str, Any]] = None
     audio_base64: Optional[str] = None
+    language: Optional[str] = "en"
 
 class VoiceChatResponse(BaseModel):
     success: bool
@@ -28,12 +41,16 @@ class VoiceChatResponse(BaseModel):
     options: Optional[Dict[str, Any]] = None
     audio_base64: Optional[str] = None
     message: Optional[str] = None
+    language: Optional[str] = "en"
 
 class TTSRequest(BaseModel):
     text: str
+    language: Optional[str] = "en"
+    voice: Optional[str] = None
 
 class ResetRequest(BaseModel):
     session_id: Optional[str] = None
+    language: Optional[str] = "en"
 
 class LocationModel(BaseModel):
     location_id: Optional[str] = None

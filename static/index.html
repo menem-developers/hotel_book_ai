@@ -11,7 +11,108 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="app-container">
+  <!-- AUTHENTICATION LOGIN PORTAL (SHOWN BEFORE LOGIN) -->
+  <div class="login-page-container" id="login-page-container">
+    <div class="login-card-backdrop"></div>
+    <div class="login-card">
+      <!-- Brand Header -->
+      <div class="login-brand">
+        <div class="login-logo-box">
+          <i class="fa-solid fa-plane-up"></i>
+        </div>
+        <div class="login-brand-titles">
+          <span class="login-brand-name">northstar</span>
+          <span class="login-brand-tag">AIR SERVICE</span>
+        </div>
+      </div>
+
+      <div class="login-header-text">
+        <h1 class="login-title">Sign in to Assistant</h1>
+        <p class="login-subtitle">Access the AI Service Desk, hotel bookings ledger & inventory dashboard.</p>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" class="login-form" onsubmit="handleLoginSubmit(event)" autocomplete="off" novalidate>
+        <!-- Error Alert Banner -->
+        <div class="login-error-alert" id="login-error-alert" style="display: none;" role="alert">
+          <i class="fa-solid fa-circle-exclamation"></i>
+          <span id="login-error-text">Invalid username or password. Please try again.</span>
+        </div>
+
+        <!-- Username Field -->
+        <div class="login-form-group">
+          <label for="login-username" class="login-label">Username</label>
+          <div class="login-input-wrapper">
+            <i class="fa-solid fa-user login-field-icon"></i>
+            <input
+              type="text"
+              id="login-username"
+              class="login-input"
+              placeholder="Enter username"
+              autocomplete="off"
+              required
+            >
+          </div>
+        </div>
+
+        <!-- Password Field -->
+        <div class="login-form-group">
+          <label for="login-password" class="login-label">Password</label>
+          <div class="login-input-wrapper">
+            <i class="fa-solid fa-lock login-field-icon"></i>
+            <input
+              type="password"
+              id="login-password"
+              class="login-input"
+              placeholder="Enter password"
+              autocomplete="new-password"
+              required
+            >
+            <button
+              type="button"
+              class="btn-toggle-password"
+              id="btn-toggle-password"
+              onclick="togglePasswordVisibility()"
+              title="Show/Hide password"
+              aria-label="Toggle password visibility"
+            >
+              <i class="fa-regular fa-eye" id="password-eye-icon"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Options Row -->
+        <div class="login-options-row">
+          <label class="remember-checkbox-label">
+            <input type="checkbox" id="remember-me" checked>
+            <span>Keep me signed in</span>
+          </label>
+        </div>
+
+        <!-- Submit Button -->
+        <button type="submit" class="btn-login-submit" id="btn-login-submit">
+          <span id="btn-login-text">Sign in to Dashboard</span>
+          <i class="fa-solid fa-arrow-right" id="btn-login-icon"></i>
+          <i class="fa-solid fa-circle-notch fa-spin" id="btn-login-spinner" style="display: none;"></i>
+        </button>
+      </form>
+
+      <!-- Security Trust Footer -->
+      <div class="login-trust-footer">
+        <div class="trust-item">
+          <i class="fa-solid fa-lock"></i>
+          <span>Secure AES-256 Session</span>
+        </div>
+        <span class="trust-divider">•</span>
+        <div class="trust-item">
+          <span class="trust-dot"></span>
+          <span>Airline Server Online</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-container" id="app-container" style="display: none;">
     <!-- LEFT SIDEBAR -->
     <aside class="sidebar">
       <!-- Brand Logo -->
@@ -75,13 +176,13 @@
         </div>
 
         <div class="user-profile-card">
-          <div class="avatar-circle">AM</div>
+          <div class="avatar-circle">AD</div>
           <div class="user-details">
-            <span class="user-name">Alex Morgan</span>
-            <span class="user-role">Passenger demo</span>
+            <span class="user-name" id="sidebar-user-name">Administrator</span>
+            <span class="user-role" id="sidebar-user-role">admin (Online)</span>
           </div>
-          <button class="btn-user-menu" title="User options">
-            <i class="fa-solid fa-ellipsis"></i>
+          <button class="btn-user-menu btn-logout-action" id="btn-sidebar-logout" onclick="handleLogout()" title="Log out">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
           </button>
         </div>
       </div>
@@ -98,6 +199,71 @@
         </div>
 
         <div class="header-right-tools">
+          <!-- MULTILINGUAL DROPDOWN (English / Hindi / Spanish) -->
+          <div class="lang-dropdown-wrapper" id="lang-dropdown-wrapper">
+            <button type="button" class="lang-dropdown-btn" id="lang-dropdown-btn" onclick="toggleLangDropdown(event)" aria-haspopup="true" aria-expanded="false" title="Switch Voice & Text Language">
+              <span class="lang-btn-flag" id="current-lang-flag">🇬🇧</span>
+              <span class="lang-btn-name" id="current-lang-name">English</span>
+              <i class="fa-solid fa-chevron-down lang-btn-chevron" id="lang-btn-chevron"></i>
+            </button>
+
+            <div class="lang-dropdown-menu" id="lang-dropdown-menu" role="menu">
+              <div class="lang-dropdown-header">
+                <div class="lang-dropdown-header-title">
+                  <i class="fa-solid fa-language"></i>
+                  <span>SELECT LANGUAGE / भाषा चुनें</span>
+                </div>
+                <span class="lang-dropdown-header-sub">Voice & text switch automatically</span>
+              </div>
+              <div class="lang-options-list">
+                <!-- English -->
+                <button type="button" class="lang-menu-item active" id="lang-item-en" onclick="chooseLanguage('en')" role="menuitem">
+                  <div class="lang-item-left">
+                    <span class="lang-item-flag">🇬🇧</span>
+                    <div class="lang-item-labels">
+                      <span class="lang-item-name">English</span>
+                      <span class="lang-item-desc">English (US & Global)</span>
+                    </div>
+                  </div>
+                  <div class="lang-item-right">
+                    <span class="lang-item-badge">Aria Neural</span>
+                    <i class="fa-solid fa-check lang-item-check"></i>
+                  </div>
+                </button>
+
+                <!-- Hindi -->
+                <button type="button" class="lang-menu-item" id="lang-item-hi" onclick="chooseLanguage('hi')" role="menuitem">
+                  <div class="lang-item-left">
+                    <span class="lang-item-flag">🇮🇳</span>
+                    <div class="lang-item-labels">
+                      <span class="lang-item-name">हिन्दी (Hindi)</span>
+                      <span class="lang-item-desc">भारत / India</span>
+                    </div>
+                  </div>
+                  <div class="lang-item-right">
+                    <span class="lang-item-badge">Swara Neural</span>
+                    <i class="fa-solid fa-check lang-item-check"></i>
+                  </div>
+                </button>
+
+                <!-- Spanish -->
+                <button type="button" class="lang-menu-item" id="lang-item-es" onclick="chooseLanguage('es')" role="menuitem">
+                  <div class="lang-item-left">
+                    <span class="lang-item-flag">🇪🇸</span>
+                    <div class="lang-item-labels">
+                      <span class="lang-item-name">Español (Spanish)</span>
+                      <span class="lang-item-desc">España / Internacional</span>
+                    </div>
+                  </div>
+                  <div class="lang-item-right">
+                    <span class="lang-item-badge">Elvira Neural</span>
+                    <i class="fa-solid fa-check lang-item-check"></i>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div class="demo-badge" id="system-status-badge">
             <span class="dot-indicator"></span>
             <span>LIVE DEMO</span>
@@ -108,7 +274,10 @@
           <button class="icon-circle-btn" id="btn-help-faq" title="Help & System Info">
             <i class="fa-regular fa-circle-question"></i>
           </button>
-          <div class="avatar-circle sm">AM</div>
+          <button class="icon-circle-btn btn-logout-action" id="btn-header-logout" onclick="handleLogout()" title="Log out">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+          </button>
+          <div class="avatar-circle sm" title="Administrator (admin)">AD</div>
         </div>
       </header>
 
@@ -121,6 +290,7 @@
             <span class="divider-text">TODAY</span>
             <span class="divider-line"></span>
           </div>
+
 
           <!-- Message Bubbles Container -->
           <div class="chat-messages" id="chat-messages">
@@ -238,7 +408,7 @@
             </div>
           </form>
         </div>
-        <p class="chat-disclaimer">
+        <p class="chat-disclaimer" id="chat-disclaimer">
           AI responses can be inaccurate. Confirm bookings and policy with an authorized agent.
         </p>
       </div>

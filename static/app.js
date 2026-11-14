@@ -4,8 +4,172 @@
 // ==========================================================================
 
 let currentSessionId = localStorage.getItem("northstar_session_id") || null;
+let currentLanguage = localStorage.getItem("northstar_language") || "en";
 let lastState = null;
 let cachedBookings = [];
+
+// Multilingual Configurations for English, Hindi, and Spanish
+const LANG_CONFIG = {
+  en: {
+    flag: "🇬🇧",
+    shortName: "English",
+    name: "English",
+    voice: "en-US-AriaNeural",
+    browserVoice: "en-US",
+    placeholder: "Reply to the assistant (Type or click mic)...",
+    tag: "Voice & Text",
+    disclaimer: "AI responses can be inaccurate. Confirm bookings and policy with an authorized agent.",
+    greeting: "Welcome to **Northstar Airline Assistance**! 🌟 I can help with a demo hotel booking, existing hotel booking support, or disruption-assistance questions.\n\n**Which city or airport destination should I search for hotels near?**",
+    toast: "Language set to English (Neural Voice: Aria)"
+  },
+  hi: {
+    flag: "🇮🇳",
+    shortName: "हिन्दी",
+    name: "हिन्दी (Hindi)",
+    voice: "hi-IN-SwaraNeural",
+    browserVoice: "hi-IN",
+    placeholder: "सहायक को उत्तर दें (टाइप करें या माइक दबाएं)...",
+    tag: "वॉयस और टेक्स्ट",
+    disclaimer: "एआई प्रतिक्रियाएं सांकेतिक हो सकती हैं। कृपया अपनी बुकिंग की पुष्टि करें।",
+    greeting: "**नॉर्थस्टार एयरलाइन सहायता** में आपका स्वागत है! 🌟 मैं होटल बुकिंग, मौजूदा आरक्षण पूछताछ और यात्रा सहायता में आपकी मदद कर सकता हूँ।\n\n**आप किस शहर या हवाई अड्डे के पास होटल खोजना चाहते हैं?**",
+    toast: "भाषा हिन्दी सेट की गई (Swara Neural आवाज़ सक्रिय)"
+  },
+  es: {
+    flag: "🇪🇸",
+    shortName: "Español",
+    name: "Español (Spanish)",
+    voice: "es-ES-ElviraNeural",
+    browserVoice: "es-ES",
+    placeholder: "Responda al asistente (Escriba o use el micrófono)...",
+    tag: "Voz y Texto",
+    disclaimer: "Las respuestas de IA pueden ser aproximadas. Confirme sus reservas con un agente autorizado.",
+    greeting: "¡Bienvenido a la **Asistencia de Northstar Airlines**! 🌟 Puedo ayudarle con reservas de hotel, consultas de reservas existentes y asistencia en viaje.\n\n**¿Cerca de qué ciudad o aeropuerto desea buscar hoteles?**",
+    toast: "Idioma cambiado a Español (Voz Neural Elvira activa)"
+  }
+};
+
+function applyLanguageUI(lang) {
+  if (!LANG_CONFIG[lang]) lang = "en";
+  currentLanguage = lang;
+  localStorage.setItem("northstar_language", lang);
+
+  const cfg = LANG_CONFIG[lang];
+
+  // Sync navbar dropdown button
+  const flagEl = document.getElementById("current-lang-flag");
+  if (flagEl) flagEl.textContent = cfg.flag;
+  const nameEl = document.getElementById("current-lang-name");
+  if (nameEl) nameEl.textContent = cfg.shortName || cfg.name;
+
+  // Sync dropdown menu active state
+  document.querySelectorAll(".lang-menu-item").forEach(item => item.classList.remove("active"));
+  const activeItem = document.getElementById(`lang-item-${lang}`);
+  if (activeItem) activeItem.classList.add("active");
+
+  if (chatInput) chatInput.placeholder = cfg.placeholder;
+  const channelTag = document.getElementById("channel-tag");
+  if (channelTag) channelTag.textContent = cfg.tag;
+  const disclaimerEl = document.getElementById("chat-disclaimer");
+  if (disclaimerEl) disclaimerEl.textContent = cfg.disclaimer;
+}
+
+function toggleLangDropdown(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+  const menu = document.getElementById("lang-dropdown-menu");
+  const btn = document.getElementById("lang-dropdown-btn");
+  if (!menu) return;
+  const isOpen = menu.classList.contains("open");
+  if (isOpen) {
+    menu.classList.remove("open");
+    if (btn) {
+      btn.classList.remove("open");
+      btn.setAttribute("aria-expanded", "false");
+    }
+  } else {
+    menu.classList.add("open");
+    if (btn) {
+      btn.classList.add("open");
+      btn.setAttribute("aria-expanded", "true");
+    }
+  }
+}
+
+function closeLangDropdown() {
+  const menu = document.getElementById("lang-dropdown-menu");
+  const btn = document.getElementById("lang-dropdown-btn");
+  if (menu) menu.classList.remove("open");
+  if (btn) {
+    btn.classList.remove("open");
+    btn.setAttribute("aria-expanded", "false");
+  }
+}
+
+window.toggleLangDropdown = toggleLangDropdown;
+window.closeLangDropdown = closeLangDropdown;
+window.chooseLanguage = function(lang) {
+  closeLangDropdown();
+  selectLanguage(lang, true);
+};
+
+// Close dropdown on click outside
+document.addEventListener("click", function(e) {
+  const wrapper = document.getElementById("lang-dropdown-wrapper");
+  if (wrapper && !wrapper.contains(e.target)) {
+    closeLangDropdown();
+  }
+});
+
+// Close dropdown on Escape key
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    closeLangDropdown();
+  }
+});
+
+async function selectLanguage(lang, triggerGreeting = true) {
+  if (!LANG_CONFIG[lang]) lang = "en";
+  applyLanguageUI(lang);
+  const cfg = LANG_CONFIG[lang];
+  showToast(cfg.toast);
+
+  if (triggerGreeting) {
+    showTyping(true);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: currentSessionId,
+          message: lang === "hi" ? "नमस्ते" : (lang === "es" ? "Hola" : "Hello"),
+          language: lang
+        })
+      });
+      showTyping(false);
+      if (res.ok) {
+        const data = await res.json();
+        currentSessionId = data.session_id;
+        localStorage.setItem("northstar_session_id", currentSessionId);
+        lastState = data.state;
+        chatMessages.innerHTML = "";
+        appendAssistantBubble(data.reply, data.options, data.quick_replies, data.booking, data.audio_base64);
+      } else {
+        chatMessages.innerHTML = "";
+        appendAssistantBubble(cfg.greeting);
+      }
+    } catch (e) {
+      showTyping(false);
+      chatMessages.innerHTML = "";
+      appendAssistantBubble(cfg.greeting);
+    }
+  }
+}
+window.selectLanguage = selectLanguage;
+window.changeLanguage = function(val) {
+  selectLanguage(val, true);
+};
 
 // DOM Elements
 const chatCanvas = document.getElementById("chat-canvas");
@@ -38,6 +202,57 @@ let audioContext = null;
 let audioAnalyser = null;
 let audioVisualizerFrame = null;
 let maxAudioVolume = 0;
+
+// High-accuracy live in-browser speech recognition
+let browserSpeechRecognition = null;
+let liveTranscribedSpeech = "";
+
+function startBrowserSpeechRecognition() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) return;
+  try {
+    browserSpeechRecognition = new SpeechRec();
+    browserSpeechRecognition.continuous = true;
+    browserSpeechRecognition.interimResults = true;
+    const localeMap = { "hi": "hi-IN", "es": "es-ES", "en": "en-US" };
+    browserSpeechRecognition.lang = localeMap[currentLanguage] || "en-US";
+    liveTranscribedSpeech = "";
+
+    browserSpeechRecognition.onresult = (event) => {
+      let finalStr = "";
+      let interimStr = "";
+      for (let i = 0; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalStr += event.results[i][0].transcript + " ";
+        } else {
+          interimStr += event.results[i][0].transcript;
+        }
+      }
+      liveTranscribedSpeech = (finalStr + interimStr).trim();
+      const statusText = document.getElementById("voice-rec-status-text");
+      if (statusText && liveTranscribedSpeech) {
+        statusText.textContent = `REC: "${liveTranscribedSpeech.slice(-26)}"`;
+      }
+    };
+
+    browserSpeechRecognition.onerror = (e) => {
+      console.warn("Browser SpeechRecognition notice:", e.error);
+    };
+
+    browserSpeechRecognition.start();
+  } catch (e) {
+    console.warn("SpeechRecognition start exception:", e);
+  }
+}
+
+function stopBrowserSpeechRecognition() {
+  if (browserSpeechRecognition) {
+    try {
+      browserSpeechRecognition.stop();
+    } catch (e) {}
+    browserSpeechRecognition = null;
+  }
+}
 
 // Sidebar Nav Elements
 const btnNewChat = document.getElementById("btn-new-chat");
@@ -110,16 +325,175 @@ function setupAppListeners() {
   }
 }
 
+// ==========================================================================
+// AUTHENTICATION LOGIC (ADMIN LOGIN / LOGOUT)
+// ==========================================================================
+function checkAuthState() {
+  const token = localStorage.getItem("northstar_auth_token");
+  if (!token) {
+    showLoginScreen();
+  } else {
+    showDashboardScreen();
+    initializeChat();
+  }
+}
+
+function showLoginScreen() {
+  const loginPage = document.getElementById("login-page-container");
+  const appContainer = document.getElementById("app-container");
+  if (loginPage) loginPage.style.display = "flex";
+  if (appContainer) appContainer.style.display = "none";
+  const userInp = document.getElementById("login-username");
+  const passInp = document.getElementById("login-password");
+  if (userInp) {
+    userInp.value = "";
+    setTimeout(() => userInp.focus(), 100);
+  }
+  if (passInp) {
+    passInp.value = "";
+  }
+  const err = document.getElementById("login-error-alert");
+  if (err) err.style.display = "none";
+}
+
+function showDashboardScreen() {
+  const loginPage = document.getElementById("login-page-container");
+  const appContainer = document.getElementById("app-container");
+  if (loginPage) loginPage.style.display = "none";
+  if (appContainer) appContainer.style.display = "flex";
+  applyLanguageUI(currentLanguage);
+}
+
+function togglePasswordVisibility() {
+  const pwd = document.getElementById("login-password");
+  const icon = document.getElementById("password-eye-icon");
+  if (!pwd) return;
+  if (pwd.type === "password") {
+    pwd.type = "text";
+    if (icon) {
+      icon.classList.remove("fa-eye");
+      icon.classList.add("fa-eye-slash");
+    }
+  } else {
+    pwd.type = "password";
+    if (icon) {
+      icon.classList.remove("fa-eye-slash");
+      icon.classList.add("fa-eye");
+    }
+  }
+}
+
+async function handleLoginSubmit(e) {
+  if (e) e.preventDefault();
+  const usernameInput = document.getElementById("login-username");
+  const passwordInput = document.getElementById("login-password");
+  const alertEl = document.getElementById("login-error-alert");
+  const alertText = document.getElementById("login-error-text");
+  const btnSubmit = document.getElementById("btn-login-submit");
+  const btnText = document.getElementById("btn-login-text");
+  const btnIcon = document.getElementById("btn-login-icon");
+  const btnSpinner = document.getElementById("btn-login-spinner");
+
+  const username = usernameInput ? usernameInput.value.trim() : "";
+  const password = passwordInput ? passwordInput.value.trim() : "";
+
+  if (!username || !password) {
+    if (alertEl) {
+      alertEl.style.display = "flex";
+      if (alertText) alertText.textContent = "Please enter both username and password.";
+    }
+    return;
+  }
+
+  // Set loading state
+  if (btnSubmit) btnSubmit.disabled = true;
+  if (btnText) btnText.textContent = "Verifying...";
+  if (btnIcon) btnIcon.style.display = "none";
+  if (btnSpinner) btnSpinner.style.display = "inline-block";
+  if (alertEl) alertEl.style.display = "none";
+
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      localStorage.setItem("northstar_auth_token", data.token || "nstar_authenticated");
+      localStorage.setItem("northstar_auth_user", data.username || "admin");
+
+      showToast("Signed in successfully as Administrator.");
+
+      // Check for redirect param
+      const urlParams = new URLSearchParams(window.location.search);
+      const redirectUrl = urlParams.get("redirect");
+      if (redirectUrl && redirectUrl.startsWith("/")) {
+        window.location.href = redirectUrl;
+        return;
+      }
+
+      showDashboardScreen();
+      initializeChat();
+    } else {
+      if (alertEl) {
+        alertEl.style.display = "flex";
+        if (alertText) alertText.textContent = data.detail || data.message || "Invalid username or password. Please try again.";
+      }
+    }
+  } catch (err) {
+    console.error("Login request error:", err);
+    if (alertEl) {
+      alertEl.style.display = "flex";
+      if (alertText) alertText.textContent = "Connection error. Please check server and try again.";
+    }
+  } finally {
+    if (btnSubmit) btnSubmit.disabled = false;
+    if (btnText) btnText.textContent = "Sign in to Dashboard";
+    if (btnIcon) btnIcon.style.display = "inline-block";
+    if (btnSpinner) btnSpinner.style.display = "none";
+  }
+}
+
+async function handleLogout() {
+  const token = localStorage.getItem("northstar_auth_token");
+  try {
+    if (token) {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+    }
+  } catch (err) {
+    console.warn("Logout error:", err);
+  }
+
+  localStorage.removeItem("northstar_auth_token");
+  localStorage.removeItem("northstar_auth_user");
+  showLoginScreen();
+  showToast("Logged out successfully.");
+}
+
+window.togglePasswordVisibility = togglePasswordVisibility;
+window.handleLoginSubmit = handleLoginSubmit;
+window.handleLogout = handleLogout;
+window.checkAuthState = checkAuthState;
+window.showLoginScreen = showLoginScreen;
+window.showDashboardScreen = showDashboardScreen;
+
 // Call listeners immediately so buttons are active right away
 setupAppListeners();
 
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     setupAppListeners();
-    initializeChat();
+    checkAuthState();
   });
 } else {
-  initializeChat();
+  checkAuthState();
 }
 
 // ==========================================================================
@@ -127,11 +501,13 @@ if (document.readyState === "loading") {
 // ==========================================================================
 
 async function initializeChat() {
+  applyLanguageUI(currentLanguage);
+
   try {
     const res = await fetch("/api/chat/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: currentSessionId })
+      body: JSON.stringify({ session_id: currentSessionId, language: currentLanguage })
     });
     const data = await res.json();
     currentSessionId = data.session_id;
@@ -140,13 +516,16 @@ async function initializeChat() {
 
     // Clear canvas
     chatMessages.innerHTML = "";
-    // Only append if session has existing messages; otherwise start completely empty until user says hi!
     if (data.reply && data.reply.trim().length > 0) {
       appendAssistantBubble(data.reply, data.options, data.quick_replies);
+    } else {
+      // Prompt greeting in active language
+      selectLanguage(currentLanguage, true);
     }
   } catch (err) {
     console.error("Init chat error:", err);
     chatMessages.innerHTML = "";
+    selectLanguage(currentLanguage, true);
   }
 }
 
@@ -172,7 +551,8 @@ async function handleSendMessage(e) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: currentSessionId,
-        message: text
+        message: text,
+        language: currentLanguage
       })
     });
 
@@ -187,7 +567,12 @@ async function handleSendMessage(e) {
     appendAssistantBubble(data.reply, data.options, data.quick_replies, data.booking, data.audio_base64);
   } catch (err) {
     showTyping(false);
-    appendAssistantBubble("Apologies, I encountered a brief network delay. Please try again or rephrase your answer.");
+    const errText = currentLanguage === "hi" 
+      ? "क्षमा करें, नेटवर्क में देरी हुई है। कृपया पुनः प्रयास करें।"
+      : (currentLanguage === "es" 
+        ? "Lo sentimos, hubo un retraso de red. Por favor intente de nuevo."
+        : "Apologies, I encountered a brief network delay. Please try again.");
+    appendAssistantBubble(errText);
     console.error("Chat error:", err);
   } finally {
     chatInput.disabled = false;
@@ -202,22 +587,20 @@ async function handleResetChat() {
     const res = await fetch("/api/chat/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: currentSessionId })
+      body: JSON.stringify({ session_id: currentSessionId, language: currentLanguage })
     });
     const data = await res.json();
     currentSessionId = data.session_id;
     localStorage.setItem("northstar_session_id", currentSessionId);
     lastState = data.state;
 
-    // Reset starts completely empty until user sends a greeting
     chatMessages.innerHTML = "";
-    if (data.reply && data.reply.trim().length > 0) {
-      appendAssistantBubble(data.reply, data.options, data.quick_replies);
-    }
-    showToast("Conversation cleared. Say 'Hi' to begin.");
+    selectLanguage(currentLanguage, true);
+    showToast(LANG_CONFIG[currentLanguage]?.toast || "Conversation reset.");
   } catch (err) {
     console.error("Reset error:", err);
     chatMessages.innerHTML = "";
+    selectLanguage(currentLanguage, true);
   }
 }
 
@@ -578,6 +961,7 @@ async function startVoiceRecording() {
     if (statusText) statusText.textContent = "REC (Speak now)";
 
     startAudioVisualizer(stream);
+    startBrowserSpeechRecognition();
     closeMicPermissionModal();
 
     // Start timer only when microphone hardware is live
@@ -653,6 +1037,7 @@ function cleanupRecordingUI() {
     recordingTimerInterval = null;
   }
   stopAudioVisualizer();
+  stopBrowserSpeechRecognition();
 
   const overlay = document.getElementById("voice-recording-overlay");
   const form = document.getElementById("chat-form");
@@ -756,6 +1141,10 @@ async function processVoiceAudioBlob(blob) {
     const formData = new FormData();
     const ext = blob.type.includes("mp4") ? "mp4" : "webm";
     formData.append("audio", blob, `voice_recording.${ext}`);
+    formData.append("language", currentLanguage);
+    if (liveTranscribedSpeech && liveTranscribedSpeech.trim().length > 1) {
+      formData.append("client_transcript", liveTranscribedSpeech.trim());
+    }
     if (currentSessionId) {
       formData.append("session_id", currentSessionId);
     }
@@ -852,6 +1241,8 @@ function speakViaBrowserTTS(text) {
       .replace(/[•\-\*\+]/g, '')
       .trim();
     const utterance = new SpeechSynthesisUtterance(clean.substring(0, 320));
+    const langCfg = LANG_CONFIG[currentLanguage] || LANG_CONFIG.en;
+    utterance.lang = langCfg.browserVoice || "en-US";
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
     window.speechSynthesis.speak(utterance);
@@ -892,7 +1283,7 @@ window.handleMessageAudioClick = async function(btn, msgId) {
     playAudio(audioBase64, resetBtn);
   } else {
     try {
-      const res = await fetch(`/api/voice/tts?text=${encodeURIComponent(text.substring(0, 320))}`);
+      const res = await fetch(`/api/voice/tts?text=${encodeURIComponent(text.substring(0, 320))}&lang=${encodeURIComponent(currentLanguage)}`);
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);

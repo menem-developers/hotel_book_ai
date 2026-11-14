@@ -14,7 +14,8 @@ class OllamaClient:
     async def is_available(self) -> bool:
         """Check if Ollama server is responsive and model is present."""
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            timeout = httpx.Timeout(3.0, connect=1.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.get(f"{self.base_url}/api/tags")
                 if resp.status_code == 200:
                     models = [m.get("name") for m in resp.json().get("models", [])]
@@ -49,7 +50,8 @@ class OllamaClient:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            timeout = httpx.Timeout(self.timeout, connect=2.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     f"{self.base_url}/api/chat",
                     json=payload

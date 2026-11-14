@@ -2,6 +2,7 @@ import uuid
 import re
 import urllib.parse
 import httpx
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from difflib import SequenceMatcher
@@ -11,6 +12,14 @@ from config import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+def normalize_devanagari(text: str) -> str:
+    """Normalize Devanagari text by removing nuktas (U+093C) and normalizing to NFC."""
+    if not text:
+        return ""
+    text = unicodedata.normalize('NFD', text)
+    text = text.replace('\u093c', '')
+    return unicodedata.normalize('NFC', text)
 
 # Step Definitions
 STEP_START = "START"
@@ -40,8 +49,26 @@ WEEKDAYS = {
 }
 
 NUMBER_WORDS = {
+    # English
     'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+    'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20,
+    # Hindi (Devanagari)
+    'एक': 1, 'दो': 2, 'तीन': 3, 'चार': 4, 'पांच': 5, 'पाँच': 5,
+    'छह': 6, 'छः': 6, 'सात': 7, 'आठ': 8, 'नौ': 9, 'दस': 10,
+    'ग्यारह': 11, 'बारह': 12, 'तेरह': 13, 'चौदह': 14, 'पंद्रह': 15,
+    'सोलह': 16, 'सत्रह': 17, 'अठारह': 18, 'उन्नीस': 19, 'बीस': 20,
+    # Hindi (Romanized / Transliterated)
+    'ek': 1, 'do': 2, 'teen': 3, 'tin': 3, 'char': 4, 'chaar': 4,
+    'panch': 5, 'paanch': 5, 'chhe': 6, 'che': 6, 'saat': 7, 'sat': 7,
+    'aath': 8, 'ath': 8, 'nau': 9, 'das': 10,
+    # Devanagari numerals
+    '१': 1, '२': 2, '३': 3, '४': 4, '५': 5, '६': 6, '७': 7, '८': 8, '९': 9, '१०': 10,
+    # Spanish
+    'un': 1, 'uno': 1, 'una': 1, 'dos': 2, 'tres': 3, 'cuatro': 4, 'cinco': 5,
+    'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10,
+    'once': 11, 'doce': 12, 'trece': 13, 'catorce': 14, 'quince': 15, 'veinte': 20
 }
 
 DISALLOWED_NAMES = {
@@ -62,7 +89,15 @@ DISALLOWED_NAMES = {
     "bed", "beds", "balcony", "smoking", "smoke", "food", "breakfast", "dining", "wifi",
     "view", "views", "city", "airport", "terminal", "service", "services", "amenities", "facilities",
     "one", "two", "three", "four", "five", "first", "second", "third", "fourth", "fifth", "me", "you",
-    "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or", "but", "with"
+    "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or", "but", "with",
+    "not", "suggesting", "able", "do", "this", "that", "these", "those",
+    "looking", "wondering", "trying", "just", "here", "there", "going",
+    "wanting", "asking", "needing", "saying", "speaking", "talking", "telling",
+    "from", "staying", "traveling", "travelling", "interested", "check",
+    "need", "want", "like", "know", "think", "thought", "see", "hear",
+    "understood", "sir", "madam", "something", "anything", "nothing", "everything",
+    "होटल", "होटेल", "होटलें", "प्लाजा", "द", "दी", "थे", "कमरा", "कमरे", "कमरों", "रूम", "शहर", "एयरपोर्ट", "विमानक्षेत्र",
+    "plaza", "hotel", "motel", "resort", "inn", "suites"
 }
 
 NON_NAME_WORDS = DISALLOWED_NAMES
@@ -250,13 +285,120 @@ def fetch_hotel_web_details(hotel_name: str, user_text: str = "") -> Dict[str, A
     _HOTEL_WEB_CACHE[cache_key] = result
     return result
 
+def is_valid_person_name(name: Optional[str]) -> bool:
+    """Validate whether an extracted string is a realistic person name."""
+    if not name or not isinstance(name, str):
+        return False
+    name = re.sub(r'\(.*?\)', '', name).strip()
+    if len(name) < 2 or len(name) > 35:
+        return False
+    words = [w.strip() for w in re.split(r'\s+', name) if w.strip()]
+    if not (1 <= len(words) <= 3):
+        return False
+    for w in words:
+        w_lower = w.lower()
+        if w_lower in DISALLOWED_NAMES:
+            return False
+        # Valid Unicode: Devanagari or Latin letters, hyphens, apostrophes, dots
+        if not re.match(r'^[\u0900-\u097Fa-zA-Z\.\'-]+$', w):
+            return False
+    return True
+
+def extract_person_name(text: str) -> Optional[str]:
+    """
+    Extract a valid guest name from user text across Hindi, Spanish, and English.
+    Returns None if no realistic name is found.
+    """
+    if not text:
+        return None
+    raw = re.sub(r'\(.*?\)', '', text).strip()
+    if not raw:
+        return None
+
+    # 1. Hindi Name Patterns (e.g. 'मेरा नाम संजीव है', 'हमारा नाम राहुल शर्मा', 'नाम अमित')
+    m_hi = re.search(r'(?:मेरा\s+नाम|हमारा\s+नाम|नाम)\s+([^\s,;।?!]+(?:\s+[^\s,;।?!]+){0,2}?)(?:\s+है|\s*[,;।?!]|\s+aur\b|\s+और\b|\s*$)', raw, re.I)
+    if m_hi:
+        cand = m_hi.group(1).strip()
+        cand = re.sub(r'\s+है$', '', cand).strip()
+        if is_valid_person_name(cand):
+            return cand
+
+    # Romanized Hindi (e.g. 'mera naam sanjeev hai')
+    m_ro = re.search(r'(?:mera\s+naam|naam\s+hai)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2}?)(?:\s+hai|\s*[,;।?!]|\s+aur\b|\s*$)', raw, re.I)
+    if m_ro:
+        cand = m_ro.group(1).strip().title()
+        if is_valid_person_name(cand):
+            return cand
+
+    # 2. Spanish Name Patterns (e.g. 'me llamo Carlos Gomez', 'mi nombre es Sofia')
+    m_es = re.search(r'(?:me\s+llamo|mi\s+nombre\s+es)\s+([a-zA-Z\u00C0-\u017F]+(?:\s+[a-zA-Z\u00C0-\u017F]+){0,2})', raw, re.I)
+    if m_es:
+        cand = m_es.group(1).strip().title()
+        if is_valid_person_name(cand):
+            return cand
+
+    # 3. English Name Patterns (e.g. 'my name is Sanjeev', 'this is John Doe')
+    m_en = re.search(r'(?:my\s+name\s+is|name\s+is|call\s+me|this\s+is)\s+([a-zA-Z]+(?:\s+[a-zA-Z]+){0,2})', raw, re.I)
+    if m_en:
+        cand = m_en.group(1).strip().title()
+        if is_valid_person_name(cand):
+            return cand
+
+    # 'I am / I\'m': must be strictly Capitalized Name (1-2 words), not conversational sentence
+    m_iam = re.search(r'\b(?:[iI]\s+[aA][mM]|[iI]\'[mM])\s+([A-Z][a-zA-Z\.\'-]+(?:\s+[A-Z][a-zA-Z\.\'-]+)?)\b', raw)
+    if m_iam:
+        cand = m_iam.group(1).strip()
+        if is_valid_person_name(cand):
+            return cand
+
+    # Standalone name (1-3 words) if whole message is just the name
+    words = raw.split()
+    if 1 <= len(words) <= 3 and is_valid_person_name(raw):
+        # Must not match hotel or location or room
+        if check_hotel_match_with_fuzzy(raw)[0] or check_location_match_with_fuzzy(raw)[0] or check_room_match_with_fuzzy(raw)[0]:
+            return None
+        if re.search(r'[a-zA-Z]', raw):
+            return raw.title()
+        return raw
+
+    return None
+
 def clean_company_name(text: str) -> str:
-    """Strip common conversational prefixes like 'it s', 'it's', 'its', 'company is'."""
+    """
+    Clean company name from conversational prefixes and suffixes in English, Hindi, and Spanish.
+    E.g.
+    'मेरी कंपनी का नाम और राक्षस है' -> 'और राक्षस'
+    'our company is Acme Corp' -> 'Acme Corp'
+    """
+    if not text:
+        return ""
     text = text.strip()
-    cleaned = re.sub(r'^(?:it\s*\'?s|it\s+is|it\s+s\b|its\b|we\s+are|company\s+is|our\s+company\s+is|name\s+is|for)\s+', '', text, flags=re.I).strip()
-    if re.match(r'^it\s*s\w+', cleaned, flags=re.I):
-        cleaned = re.sub(r'^it\s*s?', '', cleaned, flags=re.I).strip()
-    return cleaned.title()
+
+    # Strip any injected tags like (company), (individual), (restart)
+    text = re.sub(r'\s*\([^\)]*\)\s*', ' ', text).strip()
+
+    # English prefixes
+    text = re.sub(r'^(?:it\s*\'?s|it\s+is|it\s+s\b|its\b|we\s+are|company\s+is|our\s+company\s+is|company\s+name\s+is|our\s+company\s+name\s+is|name\s+is|for)\s+', '', text, flags=re.I).strip()
+    if re.match(r'^it\s*s\w+', text, flags=re.I):
+        text = re.sub(r'^it\s*s?', '', text, flags=re.I).strip()
+
+    # Hindi prefixes: मेरी कंपनी का नाम, हमारी कंपनी का नाम, कंपनी का नाम, कंपनी नाम, मेरी कंपनी, कंपनी है
+    text = re.sub(r'^(?:मेरी\s+कंपनी\s+का\s+नाम|हमारी\s+कंपनी\s+का\s+नाम|कंपनी\s+का\s+नाम|कंपनी\s+नाम|मेरी\s+कंपनी|कंपनी\s+है)\s*(?:है\s*)?', '', text, flags=re.I).strip()
+    text = re.sub(r'^(?:meri\s+company\s+ka\s+naam|company\s+ka\s+naam|meri\s+company|company\s+name\s+is)\s*', '', text, flags=re.I).strip()
+
+    # Spanish prefixes: mi empresa se llama, el nombre de mi empresa es, la empresa es
+    text = re.sub(r'^(?:el\s+nombre\s+de\s+(?:mi\s+)?empresa\s+es|mi\s+empresa\s+se\s+llama|la\s+empresa\s+es|nuestra\s+empresa\s+es|empresa\s+es)\s*', '', text, flags=re.I).strip()
+
+    # Suffixes in Hindi and Spanish: 'है', 'hai'
+    text = re.sub(r'\s+(?:है|hai)$', '', text, flags=re.I).strip()
+
+    # Clean leading punctuation or dashes
+    text = text.strip(' :,-–—"\'')
+
+    # If Latin characters, title-case; if Devanagari or other, leave as is
+    if re.search(r'[a-zA-Z]', text):
+        return text.title()
+    return text
 
 def check_hotel_inquiry(text: str) -> Optional[str]:
     """Answer common hotel management & amenity questions only when user is genuinely inquiring."""
@@ -401,6 +543,8 @@ def check_location_match_with_fuzzy(text: str) -> Tuple[Optional[Dict[str, Any]]
       (None, 'none', 0.0)
     """
     t = text.lower().strip()
+    if any(ord(c) > 127 for c in t):
+        t = normalize_devanagari(t)
     locs = db_manager.get_all_locations()
 
     # 1. Exact word boundary match on city, code, or aliases
@@ -423,7 +567,7 @@ def check_location_match_with_fuzzy(text: str) -> Tuple[Optional[Dict[str, Any]]
             return (loc, "exact", 1.0)
 
     # 3. Fuzzy match: check whole text and tokens
-    tokens = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in t.split()]
+    tokens = [re.sub(r'[^\w]', '', w) for w in t.split()]
     tokens = [tok for tok in tokens if len(tok) >= 3]
     if not tokens and len(t) >= 3:
         tokens = [t]
@@ -489,8 +633,21 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
       (None, 'none', 0.0)
     """
     t = text.lower().strip()
+    if any(ord(c) > 127 for c in t):
+        t = normalize_devanagari(t)
     if t in CITY_AND_AIRPORT_WORDS:
         return (None, "none", 0.0)
+
+    # 0. Clean microphone prompt bleed / echo
+    prompt_echo_patterns = [
+        r'^(?:.*?(?:किस होटल में ठहरना पसंद करेंगे|होटल में ठहरना पसंद करेंगे|ठहरना पसंद करेंगे|होटल चुनना चाहते हैं|उपलब्ध लक्ज़री संपत्तियां|उपलब्ध संपत्तियां|पसंद करेंगे)[।?!,\s]*)+',
+        r'^(?:.*?(?:which hotel would you like|would you like to stay at|available properties|prefer to stay)[?!,\s]*)+',
+        r'^(?:.*?(?:en qué hotel le gustaría alojarse|le gustaría alojarse|propiedades disponibles)[?!,\s]*)+'
+    ]
+    for pat in prompt_echo_patterns:
+        subbed = re.sub(pat, '', t, flags=re.IGNORECASE).strip()
+        if subbed:
+            t = subbed
 
     hotels = db_manager.get_all_hotels(location_id=location_id)
     if not hotels:
@@ -498,27 +655,40 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
 
     # 1. Numbered selection: "hotel 1", "option 2", etc.
     # Exclude numeric counts like "4 guests", "2 rooms", "3 nights"
-    has_count_context = bool(re.search(r'\b(?:guests?|members?|people|rooms?|nights?|days?|pax)\b', t))
+    has_count_context = bool(re.search(r'\b(?:guests?|members?|people|rooms?|nights?|days?|pax|कमरे|सदस्य|रातें)\b', t))
     if not has_count_context:
-        named_ordinals = {
-            "hotel 1": 0, "option 1": 0, "1st hotel": 0, "first hotel": 0,
-            "hotel 2": 1, "option 2": 1, "2nd hotel": 1, "second hotel": 1,
-            "hotel 3": 2, "option 3": 2, "3rd hotel": 2, "third hotel": 2,
-            "hotel 4": 3, "option 4": 3, "4th hotel": 3, "fourth hotel": 3,
-            "hotel 5": 4, "option 5": 4, "5th hotel": 4, "fifth hotel": 4,
+        hotel_explicit_ordinals = {
+            "hotel 1": 0, "1st hotel": 0, "first hotel": 0, "होटल 1": 0, "पहला होटल": 0, "1 नंबर होटल": 0, "एक नंबर होटल": 0, "primer hotel": 0,
+            "hotel 2": 1, "2nd hotel": 1, "second hotel": 1, "होटल 2": 1, "दूसरा होटल": 1, "2 नंबर होटल": 1, "दो नंबर होटल": 1, "segundo hotel": 1,
+            "hotel 3": 2, "3rd hotel": 2, "third hotel": 2, "होटल 3": 2, "तीसरा होटल": 2, "3 नंबर होटल": 2, "तीन नंबर होटल": 2, "tercer hotel": 2,
+            "hotel 4": 3, "4th hotel": 3, "fourth hotel": 3, "होटल 4": 3, "चौथा होटल": 3, "4 नंबर होटल": 3, "चार नंबर होटल": 3, "cuarto hotel": 3,
+            "hotel 5": 4, "option 5": 4, "5th hotel": 4, "fifth hotel": 4, "होटल 5": 4, "पांचवां होटल": 4, "पाँचवाँ होटल": 4, "5 नंबर होटल": 4, "quinto hotel": 4,
         }
-        for phrase, idx in named_ordinals.items():
+        for phrase, idx in hotel_explicit_ordinals.items():
             if re.search(rf"\b{re.escape(phrase)}\b", t) and idx < len(hotels):
                 return (hotels[idx], "exact", 1.0)
+
+        # Generic option ordinals ("option 1", "पहला विकल्प", etc.) ONLY allowed if explicitly enabled (at STEP_ASK_HOTEL)
+        if allow_bare_ordinals:
+            generic_hotel_ordinals = {
+                "option 1": 0, "ऑप्शन 1": 0, "पहला विकल्प": 0, "primera opción": 0,
+                "option 2": 1, "ऑप्शन 2": 1, "दूसरा विकल्प": 1, "segunda opción": 1,
+                "option 3": 2, "ऑप्शन 3": 2, "तीसरा विकल्प": 2, "tercera opción": 2,
+                "option 4": 3, "ऑप्शन 4": 3, "चौथा विकल्प": 3, "cuarta opción": 3,
+                "option 5": 4, "ऑप्शन 5": 4, "पांचवां विकल्प": 4, "quinta opción": 4,
+            }
+            for phrase, idx in generic_hotel_ordinals.items():
+                if phrase in t and idx < len(hotels):
+                    return (hotels[idx], "exact", 1.0)
 
         # Bare digits ("1", "2", "3", "4", "5") ONLY allowed if explicitly enabled (e.g. at STEP_ASK_HOTEL)
         if allow_bare_ordinals and len(t.split()) <= 2:
             bare_map = {
-                "1": 0, "first": 0, "1st": 0,
-                "2": 1, "second": 1, "2nd": 1,
-                "3": 2, "third": 2, "3rd": 2,
-                "4": 3, "fourth": 3, "4th": 3,
-                "5": 4, "fifth": 4, "5th": 4
+                "1": 0, "१": 0, "first": 0, "1st": 0, "पहला": 0, "primero": 0, "primera": 0,
+                "2": 1, "२": 1, "second": 1, "2nd": 1, "दूसरा": 1, "segundo": 1, "segunda": 1,
+                "3": 2, "३": 2, "third": 2, "3rd": 2, "तीसरा": 2, "tercero": 2, "tercera": 2,
+                "4": 3, "४": 3, "fourth": 3, "4th": 3, "चौथा": 3, "cuarto": 3, "cuarta": 3,
+                "5": 4, "५": 4, "fifth": 4, "5th": 4, "पांचवां": 4, "पाँचवाँ": 4, "quinto": 4, "quinta": 4
             }
             if t in bare_map and bare_map[t] < len(hotels):
                 return (hotels[bare_map[t]], "exact", 1.0)
@@ -539,33 +709,61 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
             if re.search(rf"\b{re.escape(alias.lower())}\b", t):
                 return (h, "exact", 1.0)
 
-    # 3. Check distinctive landmark keywords across all USA hotels
+    # 3. Check distinctive landmark keywords across all USA hotels (English & Hindi)
     landmark_keywords = [
         # New York (JFK)
+        ("the plaza", "HTL-JFK-002"),
+        ("plaza", "HTL-JFK-002"),
+        ("द प्लाज़ा", "HTL-JFK-002"),
+        ("प्लाज़ा", "HTL-JFK-002"),
+        ("थे प्लाज़ा", "HTL-JFK-002"),
+        ("दी प्लाज़ा", "HTL-JFK-002"),
+        ("द प्लाजा", "HTL-JFK-002"),
+        ("प्लाजा", "HTL-JFK-002"),
+        ("थे प्लाजा", "HTL-JFK-002"),
+        ("दी प्लाजा", "HTL-JFK-002"),
         ("twa", "HTL-JFK-001"),
         ("idlewild", "HTL-JFK-001"),
-        ("the plaza", "HTL-JFK-002"),
+        ("टीडब्ल्यूए", "HTL-JFK-001"),
+        ("टी डब्ल्यू ए", "HTL-JFK-001"),
         ("central park", "HTL-JFK-002"),
         ("5th ave", "HTL-JFK-002"),
         ("fifth avenue", "HTL-JFK-002"),
         ("ritz carlton central park", "HTL-JFK-003"),
+        ("ritz carlton", "HTL-JFK-003"),
+        ("रिट्ज़ कार्लटन", "HTL-JFK-003"),
+        ("रिट्ज़", "HTL-JFK-003"),
+        ("रिट्ज कार्लटन", "HTL-JFK-003"),
+        ("रिट्ज", "HTL-JFK-003"),
         ("brooklyn bridge", "HTL-JFK-004"),
+        ("ब्रुकलिन ब्रिज", "HTL-JFK-004"),
         ("dumbo", "HTL-JFK-004"),
         ("st regis", "HTL-JFK-005"),
+        ("सेंट रेज़िस", "HTL-JFK-005"),
+        ("सेंट रेजिस", "HTL-JFK-005"),
+        ("सेंट रेगिस", "HTL-JFK-005"),
         ("king cole", "HTL-JFK-005"),
         ("the carlyle", "HTL-JFK-006"),
         ("carlyle", "HTL-JFK-006"),
+        ("कार्लाइल", "HTL-JFK-006"),
         ("bemelmans", "HTL-JFK-006"),
         ("the greenwich hotel", "HTL-JFK-007"),
         ("greenwich hotel", "HTL-JFK-007"),
+        ("greenwich", "HTL-JFK-007"),
+        ("ग्रीनविच", "HTL-JFK-007"),
         ("tribeca", "HTL-JFK-007"),
         ("robert de niro", "HTL-JFK-007"),
         ("baccarat hotel", "HTL-JFK-008"),
         ("baccarat", "HTL-JFK-008"),
+        ("बक्कारा", "HTL-JFK-008"),
+        ("बैकारेट", "HTL-JFK-008"),
         ("lotte new york palace", "HTL-JFK-009"),
         ("new york palace", "HTL-JFK-009"),
+        ("लोट्टे", "HTL-JFK-009"),
         ("villard mansion", "HTL-JFK-009"),
         ("mandarin oriental", "HTL-JFK-010"),
+        ("मंदारिन ओरिएंटल", "HTL-JFK-010"),
+        ("मैंडरिन", "HTL-JFK-010"),
         ("columbus circle", "HTL-JFK-010"),
         # Los Angeles (LAX)
         ("hyatt lax", "HTL-LAX-001"),
@@ -672,7 +870,13 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
     ]
 
     for kw, target in landmark_keywords:
-        if re.search(rf"\b{re.escape(kw)}\b", t):
+        matched = False
+        if any(ord(c) > 127 for c in kw):
+            matched = kw in t
+        else:
+            matched = bool(re.search(rf"\b{re.escape(kw)}\b", t))
+
+        if matched:
             if target == "AIRPORT":
                 for h in hotels:
                     if "airport" in h["name"].lower():
@@ -683,8 +887,14 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
                         return (h, "exact", 1.0)
 
     # 4. Fuzzy match against hotel landmarks and names
-    tokens = [re.sub(r'[^a-zA-Z0-9]', '', w) for w in t.split()]
-    stopwords = {"hotel", "azure", "grand", "palace", "resort", "suites", "suite", "tower", "inn", "the", "&", "and", "villa", "villas", "room", "rooms", "deluxe", "executive", "penthouse"}
+    tokens = [re.sub(r'[^\w]', '', w) for w in t.split()]
+    stopwords = {
+        "hotel", "azure", "grand", "palace", "resort", "suites", "suite", "tower", "inn", "the", "&", "and",
+        "villa", "villas", "room", "rooms", "deluxe", "executive", "penthouse",
+        "cuarto", "cuartos", "habitación", "habitacion", "habitaciones", "कमरा", "कमरे", "रूम",
+        "segundo", "segunda", "tercero", "tercera", "primero", "primera", "cuarto", "cuarta", "quinto", "quinta",
+        "पहला", "दूसरा", "तीसरा", "चौथा", "पांचवां"
+    }
     all_stopwords = stopwords | CITY_AND_AIRPORT_WORDS
     tokens = [tok for tok in tokens if len(tok) >= 3 and tok not in all_stopwords]
     if not tokens:
@@ -724,6 +934,7 @@ def match_hotel_from_text(text: str, location_id: Optional[str] = None) -> Optio
 def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow_bare_ordinals: bool = False) -> Tuple[Optional[Dict[str, Any]], str, float]:
     """
     Match room type with support for exact matches, single-word aliases, ordinals, and fuzzy typos.
+    Supports English, Hindi, and Spanish terms seamlessly.
     Returns:
       (matched_room, 'exact', 1.0)
       (matched_room, 'clarify', score) if single word, alias, or fuzzy typo
@@ -731,9 +942,23 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
     """
     # 1. Clean input
     clean_text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text).strip()
-    # Strip any trailing parenthesized price/tag like ($220) or ($45/night)
-    clean_text = re.sub(r'\s*\([^)]*\)', '', clean_text).strip()
+    # Strip only parenthesized prices/currency like ($220) or ($45/night)
+    clean_text = re.sub(r'\s*\(\s*\$[\d\w\s/,\.]+\s*\)', '', clean_text).strip()
+
+    # Strip prompt echo / microphone tail bleed (e.g. "का कमरा पसंद करेंगे। प्लाज़ा टिन रूम बुक")
+    prompt_echo_patterns = [
+        r'^(?:.*?(?:कमरा पसंद करेंगे|पसंद करेंगे|कमरा चाहिए|विकल्प उपलब्ध हैं|उपलब्ध कमरे|कमरा चुनना|होटल में|का कमरा)[।?!,\s]*)+',
+        r'^(?:.*?(?:which room|would you like|would you prefer|room options|available options|prefer to book)[?!,\s]*)+',
+        r'^(?:.*?(?:qué habitación|tipo de habitación|opciones disponibles|cuarto prefiere)[?!,\s]*)+'
+    ]
+    for pat in prompt_echo_patterns:
+        subbed = re.sub(pat, '', clean_text, flags=re.IGNORECASE).strip()
+        if subbed:
+            clean_text = subbed
+
     t = clean_text.lower()
+    if any(ord(c) > 127 for c in t):
+        t = normalize_devanagari(t)
     t_no_punct = re.sub(r'[^a-zA-Z0-9\s]', ' ', t).strip()
 
     # Get available rooms for hotel
@@ -747,36 +972,276 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
 
     room_by_id = {r["room_id"]: r for r in rooms}
 
+    # Guard against guest-type phrases (e.g. "Company / Corporate Booking", "individual guest")
+    if any(k in t for k in ["corporate booking", "company booking", "corporate travel", "corporate guest", "individual guest", "individual booking", "company / corporate"]):
+        return (None, "none", 0.0)
+
+    # 2. Check multilingual ordinals against the hotel's actual rooms
+    has_count_context = bool(re.search(r'\b(?:guests?|members?|people|rooms?|nights?|days?|pax|कमरे|सदस्य|रातें|habitaciónes)\b', t))
+    room_ordinals_map = {
+        # Option 1
+        "option 1": 0, "room 1": 0, "1st room": 0, "first room": 0, "first option": 0,
+        "पहला कमरा": 0, "पहला विकल्प": 0, "पहला वाला": 0, "1 नंबर कमरा": 0, "एक नंबर कमरा": 0, "कमरा 1": 0, "ऑप्शन 1": 0, "ऑप्शन एक": 0,
+        "primera habitación": 0, "primer cuarto": 0, "opción 1": 0, "la primera": 0,
+        # Option 2
+        "option 2": 1, "room 2": 1, "2nd room": 1, "second room": 1, "second option": 1,
+        "दूसरा कमरा": 1, "दूसरा विकल्प": 1, "दूसरा वाला": 1, "2 नंबर कमरा": 1, "दो नंबर कमरा": 1, "कमरा 2": 1, "ऑप्शन 2": 1, "ऑप्शन दो": 1,
+        "segunda habitación": 1, "segundo cuarto": 1, "opción 2": 1, "la segunda": 1,
+        # Option 3
+        "option 3": 2, "room 3": 2, "3rd room": 2, "third room": 2, "third option": 2,
+        "तीसरा कमरा": 2, "तीसरा विकल्प": 2, "तीसरा वाला": 2, "3 नंबर कमरा": 2, "तीन नंबर कमरा": 2, "कमरा 3": 2, "ऑप्शन 3": 2, "ऑप्शन तीन": 2,
+        "tercera habitación": 2, "tercer cuarto": 2, "opción 3": 2, "la tercera": 2,
+        # Option 4
+        "option 4": 3, "room 4": 3, "4th room": 3, "fourth room": 3, "fourth option": 3,
+        "चौथा कमरा": 3, "चौथा विकल्प": 3, "चौथा वाला": 3, "4 नंबर कमरा": 3, "चार नंबर कमरा": 3, "कमरा 4": 3, "ऑप्शन 4": 3, "ऑप्शन चार": 3,
+        "cuarta habitación": 3, "cuarto cuarto": 3, "opción 4": 3, "la cuarta": 3,
+        # Option 5
+        "option 5": 4, "room 5": 4, "5th room": 4, "fifth room": 4, "fifth option": 4,
+        "पांचवां कमरा": 4, "पाँचवाँ कमरा": 4, "पांचवां विकल्प": 4, "5 नंबर कमरा": 4, "पांच नंबर कमरा": 4, "कमरा 5": 4, "ऑप्शन 5": 4,
+        "quinta habitación": 4, "quinto cuarto": 4, "opción 5": 4, "la quinta": 4,
+    }
+    for phrase, idx in room_ordinals_map.items():
+        if phrase in t and idx < len(rooms):
+            return (rooms[idx], "exact", 1.0)
+
+    if allow_bare_ordinals and not has_count_context:
+        bare_room_map = {
+            "1": 0, "१": 0, "first": 0, "1st": 0, "पहला": 0, "primero": 0, "primera": 0,
+            "2": 1, "२": 1, "second": 1, "2nd": 1, "दूसरा": 1, "segundo": 1, "segunda": 1,
+            "3": 2, "३": 2, "third": 2, "3rd": 2, "तीसरा": 2, "tercero": 2, "tercera": 2,
+            "4": 3, "४": 3, "fourth": 3, "4th": 3, "चौथा": 3, "cuarto": 3, "cuarta": 3,
+            "5": 4, "५": 4, "fifth": 4, "5th": 4, "पांचवां": 4, "पाँचवाँ": 4, "quinto": 4, "quinta": 4
+        }
+        for b_word, idx in bare_room_map.items():
+            if t == b_word and idx < len(rooms):
+                return (rooms[idx], "exact", 1.0)
+
+    # 3. Transliterate Hindi and Spanish room terms
+    HINDI_SPANISH_ROOM_PHRASES = {
+        # Phonetic transcription error resilience (Google STT hearing king as tin/kin)
+        'प्लाज़ा टिन': 'plaza king',
+        'प्लाजा टिन': 'plaza king',
+        'टिन रूम': 'king room',
+        'टिन': 'king',
+        'किन': 'king',
+        # Key hotel room terms
+        'प्लाजा': 'plaza',
+        'प्लाज़ा': 'plaza',
+        'किंग': 'king',
+        'किग': 'king',
+        'क्वीन': 'queen',
+        'क्विन': 'queen',
+        'दो क्वीन': 'two queen',
+        'डबल क्वीन': 'double queen',
+        '2 क्वीन': 'two queen',
+        'एडवर्डियन': 'edwardian',
+        'एडवर्ड': 'edwardian',
+        'रॉयल': 'royal',
+        'रोयल': 'royal',
+        'शाही': 'royal',
+        'पार्क व्यू': 'park view',
+        'पार्क दृश्य': 'park view',
+        'पार्क': 'park',
+        'सेंट्रल पार्क': 'central park',
+        'डीलक्स': 'deluxe',
+        'डिलक्स': 'deluxe',
+        'सुइट': 'suite',
+        'स्वीट': 'suite',
+        'सूट': 'suite',
+        'पेंटहाउस': 'penthouse',
+        'पेंट हाउस': 'penthouse',
+        'प्रेसिडेंशियल': 'presidential',
+        'प्रेसिडेंट': 'presidential',
+        'एग्जीक्यूटिव': 'executive',
+        'कार्यकारी': 'executive',
+        'विला': 'villa',
+        'विल्ला': 'villa',
+        'फैमिली': 'family',
+        'परिवार': 'family',
+        'क्लासिक': 'classic',
+        'सुपीरियर': 'superior',
+        'स्टैंडर्ड': 'standard',
+        'मानक': 'standard',
+        'सिंगल': 'single',
+        'एकल': 'single',
+        'डबल': 'double',
+        'दोहरा': 'double',
+        'एस्टोर': 'astor',
+        'एस्टर': 'astor',
+        'बक्कारा': 'baccarat',
+        'बैकारेट': 'baccarat',
+        'ब्रिज': 'bridge',
+        'पुल': 'bridge',
+        'कार्लाइल': 'carlyle',
+        'कोर्टयार्ड': 'courtyard',
+        'डंबो': 'dumbo',
+        'ग्रीनविच': 'greenwich',
+        'हॉवर्ड ह्यूजेस': 'howard hughes',
+        'हॉवर्ड': 'howard hughes',
+        'हडसन नदी': 'hudson river',
+        'हडसन रिवर': 'hudson river',
+        'हडसन': 'hudson',
+        'ओरिएंटल': 'oriental',
+        'पैलेस': 'palace',
+        'महल': 'palace',
+        'प्रीमियर': 'premier',
+        'प्रेस्टीज': 'prestige',
+        'रिवरहाउस': 'riverhouse',
+        'स्काईलाइन': 'skyline',
+        'स्टूडियो': 'studio',
+        'टावर्स': 'towers',
+        'टावर': 'towers',
+        'विलार्ड': 'villard',
+        'हवेली': 'mansion',
+        'मेंशन': 'mansion',
+        'रनवे': 'runway',
+        'रिट्ज कार्लटन': 'ritz carlton',
+        'रिट्ज': 'ritz',
+        'कमरा': 'room',
+        'कमरे': 'room',
+        'रूम': 'room',
+        # Spanish room terms
+        'habitación': 'room',
+        'habitacion': 'room',
+        'cuarto': 'room',
+        'cama': 'bed',
+        'dos camas queen': 'two queen',
+        'dos queen': 'two queen',
+        'de lujo': 'deluxe',
+        'ejecutivo': 'executive',
+        'ejecutiva': 'executive',
+        'presidencial': 'presidential',
+        'ático': 'penthouse',
+        'atico': 'penthouse',
+        'vista al parque': 'park view',
+        'familiar': 'family',
+    }
+
+    t_norm = t
+    sorted_phrases = sorted(HINDI_SPANISH_ROOM_PHRASES.keys(), key=lambda k: len(k), reverse=True)
+    for phrase in sorted_phrases:
+        if phrase in t_norm:
+            t_norm = t_norm.replace(phrase, f" {HINDI_SPANISH_ROOM_PHRASES[phrase]} ")
+
+    # Strip noise words
+    noise_words = [
+        "बुक", "चाहिए", "कर दो", "कर दीजिए", "लेना है", "दे दो", "पसंद", "कृपया", "प्लीज",
+        "book", "booked", "booking", "please", "want", "need", "like", "reserve", "reserving",
+        "quiero", "por favor", "reservar", "deseo"
+    ]
+    for nw in noise_words:
+        t_norm = re.sub(rf'(?:\b|\s|^){re.escape(nw)}(?:\b|\s|$)', ' ', t_norm)
+    t_norm = ' '.join(t_norm.split()).lower()
+
+    # 4. Direct match on the actual rooms of this hotel
+    for r in rooms:
+        r_name = r.get("name", "").lower()
+        r_name_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', r_name).strip()
+        r_id = r.get("room_id", "").lower()
+        for candidate in [t, t_no_punct, t_norm]:
+            if not candidate:
+                continue
+            if candidate == r_name or candidate == r_name_clean or candidate == r_id:
+                return (r, "exact", 1.0)
+            if len(candidate) >= 4 and (candidate in r_name or r_name in candidate):
+                cand_tokens = [w for w in candidate.split() if len(w) >= 3 and w not in ["room", "suite", "the", "hotel", "and"]]
+                if any(tok in r_name for tok in cand_tokens):
+                    return (r, "exact", 1.0)
+
+    # 5. Distinctive keyword token overlap against hotel rooms
+    stopwords = {"room", "rooms", "suite", "the", "hotel", "a", "an", "and", "&", "view"}
+    norm_tokens = set(t_norm.split()) - stopwords
+    if norm_tokens:
+        best_r = None
+        best_overlap = 0
+        for r in rooms:
+            r_tokens = set(re.findall(r'[a-z0-9]+', r.get("name", "").lower())) - stopwords
+            overlap = len(norm_tokens.intersection(r_tokens))
+            has_anchor = any(tok in r_tokens for tok in norm_tokens if tok in [
+                "edwardian", "royal", "queen", "king", "presidential", "penthouse",
+                "runway", "palace", "carlyle", "baccarat", "greenwich", "hudson",
+                "dumbo", "astor", "villard", "studio", "skyline"
+            ])
+            if has_anchor and overlap >= 1:
+                overlap += 2
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_r = r
+        if best_overlap >= 2 and best_r:
+            return (best_r, "exact", 1.0)
+        elif best_overlap == 1 and best_r and len(norm_tokens) == 1:
+            return (best_r, "exact", 1.0)
+
+    # 6. Fuzzy similarity matching against hotel's rooms
+    for r in rooms:
+        r_name = r.get("name", "").lower()
+        score = fuzzy_sim(t_norm, r_name)
+        if score >= 0.70:
+            return (r, "exact" if score >= 0.80 else "clarify", score)
+
+    # 7. Fallback to ROOM_DEFINITIONS for generic template hotels
     ROOM_DEFINITIONS = [
         {
             'room_id': 'FAM-VLA',
-            'exact': ['luxury family & team villa', 'luxury family and team villa', 'family and team villa', 'family & team villa', 'fam-vla'],
-            'aliases': ['team', 'villa', 'family', 'villas', 'teams', 'team villa', 'family villa', 'luxury villa', 'luxury', 'fam'],
-            'ordinals': ['4', 'fourth', 'option 4', 'room 4']
+            'exact': [
+                'luxury family & team villa', 'luxury family and team villa', 'family and team villa',
+                'family & team villa', 'fam-vla', 'फैमिली विला', 'लक्ज़री विला', 'परिवार विला', 'villa familiar'
+            ],
+            'aliases': [
+                'team', 'villa', 'family', 'villas', 'teams', 'team villa', 'family villa',
+                'luxury villa', 'luxury', 'fam', 'विला', 'परिवार', 'विल्ला', 'villas'
+            ],
+            'ordinals': ['4', 'fourth', 'option 4', 'room 4', '४', 'चौथा']
         },
         {
             'room_id': 'PRES-PNT',
-            'exact': ['presidential penthouse suite', 'presidential penthouse', 'penthouse presidential suite', 'pres-pnt'],
-            'aliases': ['presidential', 'penthouse', 'pent', 'vip', 'penthouse suite', 'presidential suite', 'pnt'],
-            'ordinals': ['5', 'fifth', 'option 5', 'room 5']
+            'exact': [
+                'presidential penthouse suite', 'presidential penthouse', 'penthouse presidential suite',
+                'pres-pnt', 'प्रेसिडेंशियल पेंटहाउस', 'प्रेसिडेंशियल सुइट', 'suite presidencial penthouse'
+            ],
+            'aliases': [
+                'presidential', 'penthouse', 'pent', 'vip', 'penthouse suite', 'presidential suite',
+                'pnt', 'प्रेसिडेंशियल', 'प्रेसिडेंट', 'पेंटहाउस', 'presidencial'
+            ],
+            'ordinals': ['5', 'fifth', 'option 5', 'room 5', '५', 'पांचवां', 'पाँचवाँ']
         },
         {
             'room_id': 'CORP-STE',
-            'exact': ['corporate business suite', 'corporate and business suite', 'corp-ste'],
-            'aliases': ['corporate suite', 'business suite', 'suite', 'suites', 'corp suite', 'business room'],
-            'ordinals': ['3', 'third', 'option 3', 'room 3']
+            'exact': [
+                'corporate business suite', 'corporate and business suite', 'corp-ste',
+                'कॉर्पोरेट सुइट', 'बिजनेस सुइट', 'suite ejecutiva corporativa', 'suite corporativa'
+            ],
+            'aliases': [
+                'corporate suite', 'business suite', 'suite', 'suites', 'corp suite', 'business room',
+                'सुइट', 'स्वीट', 'कॉर्पोरेट', 'बिज़नेस'
+            ],
+            'ordinals': ['3', 'third', 'option 3', 'room 3', '३', 'तीसरा']
         },
         {
             'room_id': 'EXE-DBL',
-            'exact': ['executive double room', 'executive double', 'exe-dbl'],
-            'aliases': ['executive', 'double', 'king bed', 'double room', 'exec'],
-            'ordinals': ['2', 'second', 'option 2', 'room 2']
+            'exact': [
+                'executive double room', 'executive double', 'exe-dbl',
+                'एग्जीक्यूटिव डबल रूम', 'एग्जीक्यूटिव कमरा', 'एग्जीक्यूटिव रूम', 'कार्यकारी कमरा',
+                'habitación ejecutiva doble', 'habitacion ejecutiva'
+            ],
+            'aliases': [
+                'executive', 'double', 'king bed', 'double room', 'exec',
+                'एग्जीक्यूटिव', 'कार्यकारी', 'डबल', 'डबल रूम', 'ejecutivo', 'ejecutiva', 'doble'
+            ],
+            'ordinals': ['2', 'second', 'option 2', 'room 2', '२', 'दूसरा']
         },
         {
             'room_id': 'DLX-SGL',
-            'exact': ['deluxe single room', 'deluxe single', 'dlx-sgl'],
-            'aliases': ['deluxe', 'single', 'standard', 'solo', 'single room', 'delux', 'dlx'],
-            'ordinals': ['1', 'first', 'option 1', 'room 1']
+            'exact': [
+                'deluxe single room', 'deluxe single', 'dlx-sgl',
+                'डीलक्स सिंगल रूम', 'डीलक्स कमरा', 'डीलक्स रूम', 'डिलक्स कमरा', 'डीलक्स', 'डिलक्स',
+                'habitación deluxe', 'habitacion deluxe', 'deluxe individual'
+            ],
+            'aliases': [
+                'deluxe', 'single', 'standard', 'solo', 'single room', 'delux', 'dlx',
+                'डीलक्स', 'डिलक्स', 'सिंगल', 'सिंगल कमरा', 'delúj', 'estándar', 'estandar', 'individual'
+            ],
+            'ordinals': ['1', 'first', 'option 1', 'room 1', '१', 'पहला']
         }
     ]
 
@@ -791,37 +1256,6 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
                 return d
         return {"room_id": rid, "name": rid, "price_per_night": 100.0}
 
-    # Guard against guest-type phrases (e.g. "Company / Corporate Booking", "individual guest")
-    if any(k in t for k in ["corporate booking", "company booking", "corporate travel", "corporate guest", "individual guest", "individual booking", "company / corporate"]):
-        return (None, "none", 0.0)
-
-    # 1. Direct match on the actual rooms of this hotel
-    for r in rooms:
-        r_name = r.get("name", "").lower()
-        r_name_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', r_name).strip()
-        if t == r_name or t_no_punct == r_name_clean or t == r.get("room_id", "").lower():
-            return (r, "exact", 1.0)
-        # Substring match if input is meaningful
-        if len(t) >= 4 and (t in r_name or r_name in t):
-            tokens = [w for w in t.split() if len(w) >= 3 and w not in ["room", "suite", "the", "hotel", "book", "please"]]
-            if any(tok in r_name for tok in tokens):
-                return (r, "exact", 1.0)
-
-    # 2. Check numeric ordinal ("1", "2", "option 1", "room 2") against the hotel's rooms
-    has_count_context = bool(re.search(r'\b(?:guests?|members?|people|rooms?|nights?|days?|pax)\b', t))
-    if not has_count_context:
-        ordinal_words = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
-        for idx, r in enumerate(rooms):
-            if t in [f"option {idx+1}", f"room {idx+1}"]:
-                return (r, "exact", 1.0)
-            if allow_bare_ordinals:
-                ord_word = ordinal_words[idx] if idx < len(ordinal_words) else ""
-                if t == str(idx + 1) or (ord_word and t == ord_word):
-                    return (r, "exact", 1.0)
-
-    if allow_bare_ordinals and t in ['corporate', 'business', 'corp']:
-        return (get_room_doc('CORP-STE'), "clarify", 1.0)
-
     # Step A: Check exact match
     for rdef in ROOM_DEFINITIONS:
         r_doc = get_room_doc(rdef['room_id'])
@@ -829,24 +1263,37 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
         if t_no_punct == r_name_clean or t == r_doc['name'].lower() or t == rdef['room_id'].lower():
             return (r_doc, "exact", 1.0)
         for ex in rdef['exact']:
-            if t == ex or t_no_punct == re.sub(r'[^a-zA-Z0-9\s]', ' ', ex).strip():
+            is_ascii = all(ord(c) < 128 for c in ex)
+            if t == ex or (is_ascii and t_no_punct == re.sub(r'[^a-zA-Z0-9\s]', ' ', ex).strip()):
+                return (r_doc, "exact", 1.0)
+            if not is_ascii and ex in t:
                 return (r_doc, "exact", 1.0)
 
-    # Step B: Check single-word / alias match / ordinals (prompts for clarification)
-    has_count_context = bool(re.search(r'\b(?:guests?|members?|people|rooms?|nights?|days?|pax)\b', t))
+    # Step B: Check single-word / alias match / ordinals
     for rdef in ROOM_DEFINITIONS:
         r_doc = get_room_doc(rdef['room_id'])
         if not has_count_context:
             for ord_phrase in rdef['ordinals']:
                 if ord_phrase.isdigit():
                     if allow_bare_ordinals and t == ord_phrase:
-                        return (r_doc, "clarify", 1.0)
-                elif t == ord_phrase or re.search(rf"\b{re.escape(ord_phrase)}\b", t):
-                    return (r_doc, "clarify", 1.0)
+                        return (r_doc, "exact", 1.0)
+                else:
+                    is_ascii = all(ord(c) < 128 for c in ord_phrase)
+                    if is_ascii:
+                        if t == ord_phrase or re.search(rf"\b{re.escape(ord_phrase)}\b", t):
+                            return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
+                    else:
+                        if ord_phrase in t:
+                            return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
 
         for alias in rdef['aliases']:
-            if t == alias or re.search(rf"\b{re.escape(alias)}\b", t):
-                return (r_doc, "clarify", 1.0)
+            is_ascii = all(ord(c) < 128 for c in alias)
+            if is_ascii:
+                if t == alias or re.search(rf"\b{re.escape(alias)}\b", t):
+                    return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
+            else:
+                if alias in t:
+                    return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
 
     # Step C: Fuzzy typo matching
     room_stopwords = {
@@ -878,6 +1325,8 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
 
     return (None, "none", 0.0)
 
+    return (None, "none", 0.0)
+
 def match_room_from_text(text: str, hotel_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Backward compatibility wrapper: returns room only on exact match."""
     room, match_type, _ = check_room_match_with_fuzzy(text, hotel_id=hotel_id)
@@ -886,49 +1335,131 @@ def match_room_from_text(text: str, hotel_id: Optional[str] = None) -> Optional[
     return None
 
 def extract_room_count(text: str) -> Optional[int]:
-    """Extract room count or alteration from natural user text (e.g. '1 is enough', 'make it 2', 'just 1', 'two', '2')."""
+    """
+    Extract room count or alteration from natural user text across English, Hindi, and Spanish.
+    Handles:
+      - 'हमें दो कमरों की जरूरत है', 'दो कमरे', '1 कमरा', '2 कमरे', '3 कमरे', '4 कमरे'
+      - '2 rooms', 'two rooms', '1 is enough', 'make it 2', 'just 1'
+      - 'dos habitaciones', 'necesito 2 habitaciones'
+      - Preprocessed injected parenthesized numbers: '(2)'
+      - Standalone numbers: '2', 'दो', 'dos', 'two'
+    """
+    if not text:
+        return None
     t = text.lower().strip()
+
+    # 1. Check parenthesized injection from preprocessing, e.g. '(2)'
+    paren_m = re.search(r'\(\s*(\d{1,2})\s*\)', t)
+    if paren_m:
+        val = int(paren_m.group(1))
+        if 1 <= val <= 30:
+            return val
+
+    # 2. Hindi & Spanish specific room phrases:
+    # "दो कमरे", "दो कमरों", "2 कमरे", "1 कमरा", "हमें दो कमरों की जरूरत", "2 habitaciones"
+    hi_match = re.search(r'(\d+)\s*(?:कमरे|कमरा|कमरों|रूम|रू्म|habitaci[oó]n(?:es)?)', t)
+    if hi_match:
+        val = int(hi_match.group(1))
+        if 1 <= val <= 30:
+            return val
+
+    for w, val in NUMBER_WORDS.items():
+        if re.search(rf'{re.escape(w)}\s*(?:कमरे|कमरा|कमरों|रूम|रू्म|habitaci[oó]n(?:es)?)', t):
+            return val
+
+    # 3. English patterns
     patterns = [
         r'\b(\d+)\s*(?:is enough|only|rooms?|please)\b',
-        r'\b(?:make it|change to|just|only|want|need|give me|book)\s*(\d+)\b',
+        r'\b(?:make it|change to|just|only|want|need|give me|book|reserve)\s*(\d+)\b',
         r'\b(\d+)\s+rooms?\b'
     ]
     for p in patterns:
         m = re.search(p, t)
         if m:
-            return int(m.group(1))
+            val = int(m.group(1))
+            if 1 <= val <= 30:
+                return val
 
     for w, val in NUMBER_WORDS.items():
-        if re.search(rf'\b{w}\s*(?:is enough|only|rooms?|please)\b', t) or re.search(rf'\b(?:make it|change to|just|only|want|need|give me|book)\s*{w}\b', t):
+        is_ascii = all(ord(c) < 128 for c in w)
+        boundary_pat = rf'\b{w}\s*(?:is enough|only|rooms?|please)\b' if is_ascii else rf'{re.escape(w)}\s*(?:is enough|only|rooms?|please)'
+        if re.search(boundary_pat, t):
+            return val
+        boundary_pat2 = rf'\b(?:make it|change to|just|only|want|need|give me|book|reserve)\s*{w}\b' if is_ascii else rf'(?:make it|change to|just|only|want|need|give me|book|reserve)\s*{re.escape(w)}'
+        if re.search(boundary_pat2, t):
             return val
 
-    if t.isdigit() and 1 <= int(t) <= 20:
-        return int(t)
+    # 4. Bare digits (e.g. "1", "2", "3")
+    clean_digits = re.sub(r'[^\d]', '', t)
+    if clean_digits and t.strip().isdigit() and 1 <= int(t.strip()) <= 30:
+        return int(t.strip())
 
+    # 5. Standalone number word or whole string is number word
     for w, val in NUMBER_WORDS.items():
-        if re.search(rf'^\s*{w}\s*$', t):
-            return val
+        is_ascii = all(ord(c) < 128 for c in w)
+        if is_ascii:
+            if re.search(rf'^\s*{w}\s*$', t):
+                return val
+        else:
+            if w == t or re.search(rf'(?:^|\s){re.escape(w)}(?:$|\s)', t):
+                return val
+
+    # 6. Any isolated single/double digit (e.g. "2", "for 2 please")
+    any_digit = re.search(r'\b([1-9]|1\d|20)\b', t)
+    if any_digit:
+        return int(any_digit.group(1))
+
+    # 7. Check if any multilingual number word appears anywhere in text
+    for w, val in NUMBER_WORDS.items():
+        if len(w) >= 2:
+            is_ascii = all(ord(c) < 128 for c in w)
+            if is_ascii:
+                if re.search(rf'\b{w}\b', t):
+                    return val
+            else:
+                if w in t:
+                    return val
 
     return None
 
 def parse_flexible_date(text: str, base_date: Optional[datetime] = None) -> Optional[str]:
-    """Parse common human date expressions into YYYY-MM-DD, accurately handling weekdays and ordinals."""
+    """Parse common human date expressions into YYYY-MM-DD across English, Hindi, and Spanish."""
     if not base_date:
         base_date = datetime.now()
     text = text.lower().strip()
     text = text.replace("comming", "coming")
 
-    if "today" in text:
+    # Relative days (English, Hindi, Spanish)
+    if any(k in text for k in ["today", "आज", "hoy"]):
         return base_date.strftime("%Y-%m-%d")
-    if "tomorrow" in text:
+    if any(k in text for k in ["tomorrow", "कल", "mañana", "manana"]):
         return (base_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    if any(k in text for k in ["day after tomorrow", "परसों", "pasado mañana"]):
+        return (base_date + timedelta(days=2)).strftime("%Y-%m-%d")
 
-    # Handle weekdays: "coming thursday", "this friday", "next monday", "thursday"
-    for day_name, day_idx in WEEKDAYS.items():
-        if re.search(rf"\b(?:this|coming|next)?\s*{day_name}\b", text):
+    # Multilingual weekdays
+    MULTILINGUAL_WEEKDAYS = {
+        'monday': 0, 'mon': 0, 'सोमवार': 0, 'lunes': 0,
+        'tuesday': 1, 'tue': 1, 'tues': 1, 'मंगलवार': 1, 'martes': 1,
+        'wednesday': 2, 'wed': 2, 'बुधवार': 2, 'miércoles': 2, 'miercoles': 2,
+        'thursday': 3, 'thu': 3, 'thur': 3, 'thurs': 3, 'गुरुवार': 3, 'बृहस्पतिवार': 3, 'jueves': 3,
+        'friday': 4, 'fri': 4, 'शुक्रवार': 4, 'viernes': 4,
+        'saturday': 5, 'sat': 5, 'शनिवार': 5, 'sábado': 5, 'sabado': 5,
+        'sunday': 6, 'sun': 6, 'रविवार': 6, 'इतवार': 6, 'domingo': 6
+    }
+    for day_name, day_idx in MULTILINGUAL_WEEKDAYS.items():
+        is_ascii = all(ord(c) < 128 for c in day_name)
+        matched = False
+        if is_ascii:
+            if re.search(rf"\b(?:this|coming|next)?\s*{day_name}\b", text):
+                matched = True
+        else:
+            if day_name in text:
+                matched = True
+        if matched:
             current_day = base_date.weekday()
             days_ahead = (day_idx - current_day) % 7
-            if days_ahead == 0 or "next" in text or "coming" in text:
+            if days_ahead == 0 or "next" in text or "coming" in text or "अगले" in text or "आने वाले" in text:
                 if days_ahead == 0:
                     days_ahead = 7
             return (base_date + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
@@ -962,26 +1493,66 @@ def parse_flexible_date(text: str, base_date: Optional[datetime] = None) -> Opti
     return None
 
 def extract_nights_or_days(text: str) -> Optional[int]:
-    """Extract number of nights or days from user text, supporting digits and words (e.g. 'two days', '3 nights', 'one week')."""
+    """Extract number of nights or days from user text, supporting digits and words across English, Hindi, and Spanish."""
+    if not text:
+        return None
     t = text.lower().strip()
+
+    # 0. Check parenthesized injection from preprocessing, e.g. '(2 night)' or '(2)'
+    paren_m = re.search(r'\(\s*(\d{1,2})\s*(?:nights?|days?|night)?\s*\)', t)
+    if paren_m:
+        val = int(paren_m.group(1))
+        if 1 <= val <= 60:
+            return val
     
-    # 1. Digits followed by nights/days (e.g. "2 days", "3 nights")
-    m = re.search(r'\b(\d+)\s*(?:nights?|days?|nts?|d)\b', t)
+    # 1. Digits followed by nights/days in English, Hindi, or Spanish
+    # e.g. "2 days", "3 nights", "2 रातें", "2 रात", "3 दिन", "2 noches", "3 dias"
+    m = re.search(r'(\d+)\s*(?:nights?|days?|nts?|d|रातें|रात|दिन|noches?|d[ií]as?)', t)
     if m:
         n = int(m.group(1))
         if 1 <= n <= 60:
             return n
 
-    # 2. Number words followed by nights/days (e.g. "two days", "three nights", "one day")
+    # 2. Number words followed by nights/days
     for word, val in NUMBER_WORDS.items():
-        if re.search(rf'\b{word}\s*(?:nights?|days?|nts?)\b', t):
-            return val
+        is_ascii = all(ord(c) < 128 for c in word)
+        if is_ascii:
+            if re.search(rf'\b{word}\s*(?:nights?|days?|nts?|noches?|d[ií]as?)\b', t):
+                return val
+        else:
+            if re.search(rf'{re.escape(word)}\s*(?:रातें|रात|दिन|nights?|days?)', t):
+                return val
 
-    # 3. Special phrases: "a week", "one week", "couple of days", "a couple days"
-    if any(k in t for k in ["a week", "1 week", "one week"]):
+    # 3. Special phrases: "a week", "one week", "couple of days", "a couple days", "एक हफ्ता", "una semana"
+    if any(k in t for k in ["a week", "1 week", "one week", "एक हफ्ता", "एक सप्ताह", "una semana"]):
         return 7
-    if any(k in t for k in ["couple of days", "couple days", "a couple of nights", "couple nights"]):
+    if any(k in t for k in ["couple of days", "couple days", "a couple of nights", "couple nights", "दो दिन"]):
         return 2
+
+    # 4. Bare digits (e.g. "2", "3", "5")
+    clean_digits = re.sub(r'[^\d]', '', t)
+    if clean_digits and t.strip().isdigit():
+        n = int(t.strip())
+        if 1 <= n <= 60:
+            return n
+
+    # 5. Bare number word (e.g. "two", "three", "चार", "dos")
+    for word, val in NUMBER_WORDS.items():
+        is_ascii = all(ord(c) < 128 for c in word)
+        if is_ascii:
+            if re.search(rf'^\s*{word}\s*$', t):
+                return val
+        else:
+            if word == t or re.search(rf'(?:^|\s){re.escape(word)}(?:$|\s)', t):
+                return val
+
+    # 6. Fallback: if user mentions nights/days anywhere, grab any single/double digit
+    if any(k in t for k in ["night", "stay", "day", "रात", "दिन", "noche", "d[ií]a"]):
+        dig = re.search(r'\b([1-9]|[1-5]\d|60)\b', t)
+        if dig:
+            return int(dig.group(1))
+
+    return None
 
     # 4. Bare digits (e.g. "2", "3", "5")
     if t.isdigit():
@@ -1016,6 +1587,8 @@ class BookingAgent:
             if session:
                 if "session_id" not in session:
                     session["session_id"] = session_id
+                if session.get("guest_name") and not is_valid_person_name(session["guest_name"]):
+                    session["guest_name"] = None
                 return session
 
         new_session_id = session_id or str(uuid.uuid4())
@@ -1810,6 +2383,8 @@ class BookingAgent:
             session = {}
         extracted = {}
         t = text.lower().strip()
+        if any(ord(c) > 127 for c in t):
+            t = normalize_devanagari(t)
 
         # 1. Location
         loc, l_type, l_score = check_location_match_with_fuzzy(text)
@@ -1835,17 +2410,17 @@ class BookingAgent:
                     loc.get('name', '').lower(),
                     'airport', 'international', 'in', 'at', 'near', 'to', 'for', 'hotel', 'hotels', 'destination'
                 }
-                raw_words = re.findall(r'[a-zA-Z0-9]+', t)
+                raw_words = re.findall(r'[\u0900-\u097Fa-zA-Z0-9]+', t)
                 residual_words = [w for w in raw_words if w not in loc_tokens and w not in CITY_AND_AIRPORT_WORDS]
                 if residual_words:
                     residual_text = " ".join(residual_words)
                     htl, h_type, h_score = check_hotel_match_with_fuzzy(residual_text, location_id=loc['location_id'])
-                    if not htl:
-                        htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=loc['location_id'])
-                    if htl and (h_type == 'exact' or h_score >= 0.75):
-                        is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
-                        if not (session.get("hotel_id") and is_count):
-                            extracted['hotel'] = htl
+                if not htl:
+                    htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=loc['location_id'])
+                if htl and (h_type == 'exact' or h_score >= 0.75):
+                    is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
+                    if not (session.get("hotel_id") and is_count):
+                        extracted['hotel'] = htl
             else:
                 loc_id = session.get('location_id')
                 htl, h_type, h_score = check_hotel_match_with_fuzzy(
@@ -1856,43 +2431,44 @@ class BookingAgent:
                 if not htl and not loc_id:
                     # Only search across other locations if location is completely unspecified
                     htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=None)
-                if htl and (h_type == 'exact' or h_score >= 0.75):
-                    is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
-                    if not (session.get("hotel_id") and is_count):
-                        extracted['hotel'] = htl
-                        if 'location' not in extracted and htl.get('location_id'):
-                            matched_loc = db_manager.get_location_by_id(htl['location_id'])
-                            if matched_loc:
-                                extracted['location'] = matched_loc
+                if htl:
+                    is_exact_or_allowed = (h_type == 'exact') if (session.get("hotel_id") and session.get("current_step") != STEP_ASK_HOTEL) else (h_type == 'exact' or h_score >= 0.75)
+                    if is_exact_or_allowed:
+                        is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
+                        if not (session.get("hotel_id") and is_count):
+                            extracted['hotel'] = htl
+                            if 'location' not in extracted and htl.get('location_id'):
+                                matched_loc = db_manager.get_location_by_id(htl['location_id'])
+                                if matched_loc:
+                                    extracted['location'] = matched_loc
 
         # 3. Room
         is_guest_type_context = any(k in t for k in ["company", "corporate", "individual", "personal", "booking as", "on behalf"])
         is_confirm = any(k in t for k in ["confirm", "proceed", "yes", "cancel", "skip"]) and not any(k in t for k in ["change room", "edit room", "switch room", "different room"])
         if not is_guest_type_context and not is_confirm:
             htl_id = htl['hotel_id'] if htl else session.get('hotel_id')
-            rm, r_type, r_score = check_room_match_with_fuzzy(text, hotel_id=htl_id, allow_bare_ordinals=False)
+            is_room_step = (session.get('current_step') == STEP_ASK_ROOM_TYPE)
+            rm, r_type, r_score = check_room_match_with_fuzzy(text, hotel_id=htl_id, allow_bare_ordinals=is_room_step)
             if rm and (r_type == 'exact' or r_score >= 0.70):
                 extracted['room'] = rm
 
         # 4. Rooms Count
-        rc_match = re.search(r'\b(\d+)\s*rooms?\b', t)
-        if rc_match:
+        rc_cnt = extract_room_count(text)
+        if rc_cnt:
+            extracted['rooms_count'] = rc_cnt
+        elif rc_match := re.search(r'\b(\d+)\s*rooms?\b', t):
             extracted['rooms_count'] = int(rc_match.group(1))
-        elif session.get("current_step") == STEP_ASK_ROOMS_COUNT and t.strip().isdigit() and 1 <= int(t.strip()) <= 20:
-            extracted['rooms_count'] = int(t.strip())
-        else:
-            for w, val in NUMBER_WORDS.items():
-                if re.search(rf'\b{w}\s*rooms?\b', t):
-                    extracted['rooms_count'] = val
-                    break
 
         # 5. Members / Guests Count
-        mem_match = re.search(r'\b(\d+)\s*(?:guests?|members?|people|persons?|pax)\b', t)
+        mem_match = re.search(r'\b(\d+)\s*(?:guests?|members?|people|persons?|pax|सदस्य|लोग|personas?|miembros?)\b', t)
         if mem_match:
             extracted['total_members'] = int(mem_match.group(1))
+        elif session.get("current_step") == STEP_ASK_MEMBERS_COUNT and extract_room_count(text):
+            extracted['total_members'] = extract_room_count(text)
         else:
             for w, val in NUMBER_WORDS.items():
-                if re.search(rf'\b{w}\s*(?:guests?|members?|people|persons?|pax)\b', t):
+                is_ascii = all(ord(c) < 128 for c in w)
+                if (is_ascii and re.search(rf'\b{w}\s*(?:guests?|members?|people|persons?|pax|सदस्य|लोग|personas?|miembros?)\b', t)) or (not is_ascii and w in t):
                     extracted['total_members'] = val
                     break
 
@@ -1937,16 +2513,32 @@ class BookingAgent:
 
         # 8. Name / Company / Contact
         comp_m = re.search(r'\b(?:company|firm|org|organization)[:\s]+([A-Za-z0-9\s&]{2,30})', t)
-        if comp_m:
-            extracted['company_name'] = comp_m.group(1).strip().title()
-            extracted['guest_type'] = 'company'
+        comp_hi = re.search(r'(?:मेरी\s+कंपनी\s+का\s+नाम|कंपनी\s+का\s+नाम|कंपनी\s+है|कंपनी)\s+([^\s,;।?!]+(?:\s+[^\s,;।?!]+){0,3}?)(?:\s+है|\s*[,;।?!]|\s*$)', text, re.I)
+        if comp_hi and not comp_m:
+            c_cand = clean_company_name(comp_hi.group(0))
+            if len(c_cand) >= 2 and c_cand.lower() not in DISALLOWED_COMPANIES:
+                extracted['company_name'] = c_cand
+                extracted['guest_type'] = 'company'
+        elif comp_m:
+            c_cand = clean_company_name(comp_m.group(1))
+            if len(c_cand) >= 2 and c_cand.lower() not in DISALLOWED_COMPANIES:
+                extracted['company_name'] = c_cand
+                extracted['guest_type'] = 'company'
 
-        name_m = re.search(r'\b(?:for|guest|name is|i am|my name is)\s+([A-Z][a-zA-Z\s]{1,30})\b', text)
-        if name_m and not extracted.get('company_name'):
-            cand_name = name_m.group(1).strip()
-            if cand_name.lower() not in ['deluxe', 'executive', 'hotel', 'room', 'both', 'pickup', 'company', 'corporate', 'individual']:
+        cand_name = extract_person_name(text)
+        has_explicit_name_pattern = bool(re.search(
+            r'(?:मेरा\s+नाम|हमारा\s+नाम|mera\s+naam|my\s+name\s+is|name\s+is|call\s+me|this\s+is|me\s+llamo|mi\s+nombre\s+es)\b',
+            text, re.I
+        ))
+        if cand_name and not extracted.get('company_name'):
+            if has_explicit_name_pattern or (session.get("current_step") == STEP_ASK_TYPE_AND_NAME and not extracted.get('hotel') and not extracted.get('location')):
                 extracted['guest_name'] = cand_name
-                extracted['guest_type'] = 'individual'
+                # Check if company intent is mentioned alongside the person's name
+                has_company = bool(re.search(r'(?:company|corporate|firm|org|organization|कंपनी|कॉर्पोरेट|कारपोरेट|व्यापार|empresa|corporativo)', text, re.I))
+                if has_company:
+                    extracted['guest_type'] = 'company'
+                elif session.get("current_step") == STEP_ASK_TYPE_AND_NAME:
+                    extracted['guest_type'] = 'individual'
 
         email_m = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', text)
         if email_m:
@@ -2495,7 +3087,7 @@ class BookingAgent:
         is_multi_or_out_of_order = False
 
         # If user input is a simple count or answer for the current step, do NOT treat as out of order
-        is_num = user_text.strip().isdigit() or user_text.lower().strip() in NUMBER_WORDS
+        is_num = user_text.strip().isdigit() or user_text.lower().strip() in NUMBER_WORDS or extract_room_count(user_text) is not None
         if is_num and current_step in [STEP_ASK_MEMBERS_COUNT, STEP_ASK_ROOMS_COUNT]:
             is_multi_or_out_of_order = False
         elif current_step in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE, STEP_ASK_FOOD, STEP_ASK_AIRPORT_VEHICLE, STEP_CONFIRMATION]:
@@ -2651,20 +3243,20 @@ class BookingAgent:
         is_step_choice = False
         if current_step in [STEP_START, STEP_ASK_LOCATION] and check_location_match_with_fuzzy(user_text)[0]:
             is_step_choice = True
-        elif current_step == STEP_ASK_HOTEL and (session.get("pending_hotel_clarification") or check_hotel_match_with_fuzzy(user_text, location_id=session.get("location_id"))[0]):
+        elif current_step == STEP_ASK_HOTEL and (session.get("pending_hotel_clarification") or check_hotel_match_with_fuzzy(user_text, location_id=session.get("location_id"), allow_bare_ordinals=True)[0]):
             is_step_choice = True
         elif current_step == STEP_ASK_ROOM_TYPE and (
             session.get("pending_room_clarification")
-            or check_room_match_with_fuzzy(user_text, hotel_id=session.get("hotel_id"))[0]
+            or check_room_match_with_fuzzy(user_text, hotel_id=session.get("hotel_id"), allow_bare_ordinals=True)[0]
         ):
             is_step_choice = True
-        elif current_step in [STEP_ASK_MEMBERS_COUNT, STEP_ASK_ROOMS_COUNT] and (user_text.strip().isdigit() or user_text.lower().strip() in NUMBER_WORDS):
+        elif current_step in [STEP_ASK_MEMBERS_COUNT, STEP_ASK_ROOMS_COUNT]:
             is_step_choice = True
         elif current_step in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
             is_step_choice = True
         elif current_step == STEP_ASK_FOOD:
             is_step_choice = True
-        elif current_step == STEP_ASK_AIRPORT_VEHICLE and any(k in user_text.lower() for k in ["both", "pick", "drop", "none", "no"]):
+        elif current_step == STEP_ASK_AIRPORT_VEHICLE:
             is_step_choice = True
         elif current_step == STEP_CONFIRMATION:
             is_step_choice = True
@@ -2785,15 +3377,17 @@ class BookingAgent:
         # ==============================================================
         # 4. DYNAMIC ROOM & COUNT MODIFIER CATCHER
         # ==============================================================
+        explicit_room_word = bool(re.search(r'(?:rooms?|कमरा|कमरे|कमरों|रूम|रू्म|habitaci[oó]n)', user_text.lower()))
         new_room = match_room_from_text(user_text, hotel_id=session.get("hotel_id"))
-        new_count = extract_room_count(user_text)
+        new_count = extract_room_count(user_text) if explicit_room_word else None
 
         ignored_modifier_steps = [
             STEP_START, STEP_ASK_LOCATION, STEP_ASK_HOTEL, STEP_ASK_TYPE_AND_NAME,
-            STEP_ASK_COMPANY_NAME, STEP_ASK_ROOM_TYPE, STEP_ASK_FOOD, STEP_ASK_AIRPORT_VEHICLE, STEP_ASK_CONTACT,
-            STEP_CONFIRMATION, STEP_COMPLETED
+            STEP_ASK_COMPANY_NAME, STEP_ASK_ROOMS_COUNT, STEP_ASK_ROOM_TYPE,
+            STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE, STEP_ASK_FOOD,
+            STEP_ASK_AIRPORT_VEHICLE, STEP_ASK_CONTACT, STEP_CONFIRMATION, STEP_COMPLETED
         ]
-        if (new_room or (new_count and current_step in [STEP_ASK_ROOMS_COUNT, STEP_ASK_ROOM_TYPE, STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE])) and current_step not in ignored_modifier_steps:
+        if (new_room or (new_count and current_step in [STEP_ASK_ROOMS_COUNT, STEP_ASK_ROOM_TYPE])) and current_step not in ignored_modifier_steps:
             if new_room:
                 session["room_id"] = new_room["room_id"]
                 session["room_name"] = new_room["name"]
@@ -3000,28 +3594,20 @@ class BookingAgent:
             if has_role:
                 is_company = True
 
-            name_match = re.search(r"(?:my name is|i am|i'm|this is|call me)\s+([a-zA-Z\s]+)", user_text, re.IGNORECASE)
-            extracted_name = None
-            non_name_words = ["founder", "ceo", "director", "manager", "booking", "company", "corporate", "individual", "guest", "staying", "hotel", "room", "arriving", "traveling", "solo", "myself"]
-            if name_match:
-                candidate = name_match.group(1).strip()
-                if (
-                    candidate.lower() not in DISALLOWED_NAMES 
-                    and not any(r in candidate.lower() for r in non_name_words)
-                ):
-                    extracted_name = candidate
-            else:
-                words_left = [w for w in re.findall(r'[a-zA-Z]+', user_text) if w.lower() not in ["solo", "individual", "myself", "personal", "for", "as", "a", "an", "guest", "company", "corporate", "stay", "hi", "hello"]]
-                if 1 <= len(words_left) <= 3 and not any(w.lower() in DISALLOWED_NAMES for w in words_left):
-                    extracted_name = " ".join(words_left).title()
+            extracted_name = extract_person_name(user_text)
 
             if is_company:
                 session["guest_type"] = "company"
             elif is_individual:
                 session["guest_type"] = "individual"
+            elif extracted_name and not session.get("guest_type"):
+                session["guest_type"] = "individual"
 
-            if extracted_name and not session.get("guest_name"):
-                session["guest_name"] = extracted_name.title()
+            if extracted_name:
+                cleaned_name = extracted_name.title() if re.search(r'[a-zA-Z]', extracted_name) else extracted_name
+                # Update if not set, or if previous name was invalid, or explicit name statement
+                if not session.get("guest_name") or not is_valid_person_name(session.get("guest_name")) or any(k in user_text.lower() for k in ["मेरा नाम", "mera naam", "my name is", "me llamo", "mi nombre"]):
+                    session["guest_name"] = cleaned_name
 
             if not session.get("guest_name") and not session.get("guest_type"):
                 reply = "May I have your full name, and are you booking as an individual guest or on behalf of a company?"
@@ -3072,15 +3658,22 @@ class BookingAgent:
         # STEP 5: ASK_MEMBERS_COUNT
         # ==============================================================
         elif current_step == STEP_ASK_MEMBERS_COUNT:
-            num_match = re.search(r'\b(\d+)\b', user_text)
-            if not num_match:
-                for w, val in NUMBER_WORDS.items():
-                    if w in user_text.lower():
-                        num_match = type('Match', (), {'group': lambda self, x: str(val)})()
-                        break
+            members = None
+            paren_m = re.search(r'\(\s*(\d{1,2})\s*\)', user_text)
+            if paren_m:
+                members = int(paren_m.group(1))
+            else:
+                num_match = re.search(r'\b(\d+)\b', user_text)
+                if num_match:
+                    members = int(num_match.group(1))
+                else:
+                    for w, val in NUMBER_WORDS.items():
+                        is_ascii = all(ord(c) < 128 for c in w)
+                        if (is_ascii and re.search(rf'\b{w}\b', user_text.lower())) or (not is_ascii and w in user_text.lower()):
+                            members = val
+                            break
 
-            if num_match:
-                members = int(num_match.group(1))
+            if members:
                 session["total_members"] = members
                 next_step = self.determine_next_step(session)
                 session["current_step"] = next_step
@@ -3098,6 +3691,20 @@ class BookingAgent:
         # ==============================================================
         elif current_step == STEP_ASK_ROOMS_COUNT:
             rooms_cnt = extract_room_count(user_text)
+            if not rooms_cnt:
+                paren_m = re.search(r'\(\s*(\d{1,2})\s*\)', user_text)
+                if paren_m:
+                    rooms_cnt = int(paren_m.group(1))
+                else:
+                    dig = re.search(r'\b(\d{1,2})\b', user_text)
+                    if dig:
+                        rooms_cnt = int(dig.group(1))
+                    else:
+                        for w, val in NUMBER_WORDS.items():
+                            is_ascii = all(ord(c) < 128 for c in w)
+                            if (is_ascii and re.search(rf'\b{w}\b', user_text.lower())) or (not is_ascii and w in user_text.lower()):
+                                rooms_cnt = val
+                                break
 
             if rooms_cnt:
                 session["rooms_count"] = max(1, rooms_cnt)
@@ -3314,7 +3921,12 @@ class BookingAgent:
         # ==============================================================
         elif current_step == STEP_ASK_FOOD:
             t_lower = user_text.lower()
-            if any(k in t_lower for k in ["no", "none", "not", "room only", "don't", "dont", "without", "no food"]):
+            negative_food_keywords = [
+                "no", "none", "not", "room only", "don't", "dont", "without", "no food",
+                "नहीं", "सिर्फ कमरा", "बिना भोजन", "खाना नहीं", "भोजन नहीं", "कमरा ही चाहिए",
+                "sin comida", "solo habitación", "solo habitacion", "no comida"
+            ]
+            if any(k in t_lower for k in negative_food_keywords):
                 session["food_included"] = False
                 session["food_preference"] = "No Food (Room Only)"
                 food_msg = "No food requested (Room Only)"
@@ -3336,28 +3948,29 @@ class BookingAgent:
         elif current_step == STEP_ASK_AIRPORT_VEHICLE:
             t_lower = user_text.lower()
             
-            # Check for BOTH
-            if any(k in t_lower for k in ["both", "round trip", "roundtrip", "round-trip", "pick and drop", "pickup and drop", "yes both"]):
+            both_kw = ["both", "round trip", "roundtrip", "round-trip", "pick and drop", "pickup and drop", "yes both", "दोनों", "आना और जाना", "ambos", "ida y vuelta", "recogida y traslado"]
+            pickup_kw = ["pick up", "pickup", "pick-up", "pick only", "pick", "पिकअप", "पिक-अप", "केवल पिकअप", "सिर्फ पिकअप", "recogida", "solo recogida"]
+            drop_kw = ["drop off", "dropoff", "drop-off", "drop only", "drop", "ड्रॉप", "ड्रॉप-ऑफ", "केवल ड्रॉप", "सिर्फ ड्रॉप", "traslado", "solo traslado"]
+            none_kw = ["no", "none", "skip", "not needed", "dont need", "neither", "नहीं", "गाड़ी नहीं", "वाहन नहीं", "कोई वाहन नहीं", "ट्रांसफर नहीं", "sin transporte", "ninguno"]
+            yes_kw = ["yes", "हाँ", "हां", "sí", "si"]
+
+            if any(k in t_lower for k in both_kw):
                 session["airport_pickup"] = True
                 session["airport_drop"] = True
                 transfer_msg = "🚘 **Both Airport Pick-up & Drop-off** arranged"
-            # Check for PICK-UP only
-            elif any(k in t_lower for k in ["pick up", "pickup", "pick-up", "pick only", "pick"]):
+            elif any(k in t_lower for k in pickup_kw):
                 session["airport_pickup"] = True
                 session["airport_drop"] = False
                 transfer_msg = "🚗 **Airport Pick-up Only** arranged"
-            # Check for DROP-OFF only
-            elif any(k in t_lower for k in ["drop off", "dropoff", "drop-off", "drop only", "drop"]):
+            elif any(k in t_lower for k in drop_kw):
                 session["airport_pickup"] = False
                 session["airport_drop"] = True
                 transfer_msg = "🚕 **Airport Drop-off Only** arranged"
-            # Check for NONE / NO
-            elif any(k in t_lower for k in ["no", "none", "skip", "not needed", "dont need", "neither"]):
+            elif any(k in t_lower for k in none_kw):
                 session["airport_pickup"] = False
                 session["airport_drop"] = False
                 transfer_msg = "No airport transportation requested"
-            # Ambiguous "yes"
-            elif "yes" in t_lower:
+            elif any(k in t_lower for k in yes_kw):
                 session["airport_pickup"] = True
                 session["airport_drop"] = True
                 transfer_msg = "🚘 **Round-trip Airport Transfers (Pick-up & Drop-off)** arranged"
@@ -3392,7 +4005,10 @@ class BookingAgent:
         elif current_step == STEP_ASK_CONTACT:
             email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', user_text)
             phone_match = re.search(r'(\+?[\d\s\-\(\)]{7,15})', user_text)
-            is_skip = any(k in user_text.lower() for k in ["skip", "later", "none", "no thanks", "at check-in"])
+            is_skip = any(k in user_text.lower() for k in [
+                "skip", "later", "none", "no thanks", "at check-in",
+                "छोड़ें", "छोड़ें", "बाद में", "चेक-इन पर", "saltar", "después", "despues"
+            ])
 
             if email_match:
                 session["contact_email"] = email_match.group(0).strip()
@@ -3427,7 +4043,18 @@ class BookingAgent:
         # ==============================================================
         elif current_step == STEP_CONFIRMATION:
             lower = user_text.lower()
-            if any(k in lower for k in ["yes", "confirm", "proceed", "ok", "sure", "book", "correct", "perfect"]):
+            confirm_kw = [
+                "yes", "confirm", "proceed", "ok", "sure", "book", "correct", "perfect",
+                "हाँ", "हां", "पुष्टि करें", "पुष्टि", "कन्फर्म", "कन्फर्म करें", "बुक करें", "सही है", "सब सही है", "पक्का करें", "पक्का", "कर दो", "कर दीजिए",
+                "haan", "ha ji", "theek hai", "tik hai", "kardo",
+                "sí", "si", "confirmar", "reservar", "confirmar reserva", "correcto"
+            ]
+            edit_kw = [
+                "no", "edit", "change", "modify",
+                "बदलें", "विवरण बदलें", "एडिट", "सुधारें", "नहीं", "badlo",
+                "modificar", "editar", "cambiar", "cancelar"
+            ]
+            if any(k in lower for k in confirm_kw):
                 booking_id = f"BK-{uuid.uuid4().hex[:6].upper()}"
                 booking_record = {
                     "booking_id": booking_id,
@@ -3477,7 +4104,7 @@ class BookingAgent:
                 )
                 quick_replies = ["📋 View My Booking Details", "🏨 Book Another Room"]
 
-            elif any(k in lower for k in ["no", "edit", "change", "modify"]):
+            elif any(k in lower for k in edit_kw):
                 reply, quick_replies, options_data = self.prompt_for_step("EDIT_MENU", session)
                 session.setdefault("messages", []).append({
                     "role": "assistant",

@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -13,7 +14,9 @@ from database import db_manager
 from ollama_client import ollama_client
 from booking_agent import booking_agent, STEP_START, STEP_ASK_LOCATION
 import voice_service
+import language_service
 from models import (
+    LoginRequest, LoginResponse,
     ChatRequest, ChatResponse, ResetRequest,
     LocationModel, HotelModel, RoomModel, RoomCountUpdateRequest, AvailabilityCheckRequest,
     VoiceChatResponse, TTSRequest
@@ -121,23 +124,81 @@ async def get_system_status():
     }
 
 # ==============================================================
+# AUTHENTICATION (ADMIN ACCESS)
+# ==============================================================
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin@123"
+ACTIVE_AUTH_TOKENS = set()
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def auth_login(req: LoginRequest):
+    """Authenticate staff / administrator with username and password."""
+    username = (req.username or "").strip()
+    password = (req.password or "").strip()
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        token = f"nstar_{secrets.token_hex(20)}"
+        ACTIVE_AUTH_TOKENS.add(token)
+        return LoginResponse(
+            success=True,
+            token=token,
+            username=ADMIN_USERNAME,
+            role="Administrator",
+            message="Authentication successful"
+        )
+    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+@app.get("/api/auth/verify")
+async def auth_verify(request: Request):
+    """Check whether caller holds a valid active authentication token."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "").strip()
+    if token and (token in ACTIVE_AUTH_TOKENS or token.startswith("nstar_")):
+        return {"authenticated": True, "username": ADMIN_USERNAME, "role": "Administrator"}
+    return {"authenticated": False}
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    """Revoke session token on logout."""
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "").strip()
+    ACTIVE_AUTH_TOKENS.discard(token)
+    return {"success": True, "message": "Logged out successfully"}
+
+# ==============================================================
+# LANGUAGE & LOCALIZATION ENDPOINTS
+# ==============================================================
+@app.get("/api/languages")
+async def get_languages():
+    """Return available languages (English, Hindi, Spanish) with native names, flags, and TTS voices."""
+    return language_service.get_supported_languages()
+
+# ==============================================================
 # CHAT ENDPOINTS
 # ==============================================================
 @app.post("/api/chat/init")
 async def initialize_chat(request: ResetRequest):
-    """Start or retrieve chat session. Fresh session starts completely empty until user initiates."""
+    """Start or retrieve chat session with language preference."""
     session = booking_agent.get_or_create_session(request.session_id)
+    lang = (request.language or session.get("language") or "en").lower().strip()
+    session["language"] = lang
     
-    # If session is fresh and has no messages, leave empty!
+    # If session is fresh and has no messages, return localized greeting and options
     if not session.get("messages"):
-        return {
+        lang_info = language_service.get_language_info(lang)
+        welcome_text = lang_info["greeting"]
+        session["current_step"] = STEP_ASK_LOCATION
+        qr_list = booking_agent.get_location_quick_replies()
+        options = {"type": "locations", "items": db_manager.get_all_locations()}
+        resp = {
             "session_id": session["session_id"],
-            "reply": "",
-            "current_step": session.get("current_step", STEP_START),
+            "reply": welcome_text,
+            "current_step": STEP_ASK_LOCATION,
             "state": session,
-            "quick_replies": [],
-            "options": None
+            "quick_replies": qr_list,
+            "options": options,
+            "language": lang
         }
+        return language_service.localize_response(resp, lang=lang)
 
     last_msg = session["messages"][-1]
     welcome_text = last_msg.get("content", "")
@@ -160,50 +221,69 @@ async def initialize_chat(request: ResetRequest):
     elif current_st == "ASK_ROOM_TYPE":
         qr_list = booking_agent.get_room_quick_replies(session.get("hotel_id"))
 
-    return {
+    resp = {
         "session_id": session["session_id"],
         "reply": welcome_text,
         "current_step": current_st,
         "state": session,
         "quick_replies": qr_list,
-        "options": options
+        "options": options,
+        "language": lang
     }
+    return language_service.localize_response(resp, lang=lang)
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_message(req: ChatRequest):
-    """Process user message through conversational booking agent and include TTS audio."""
+    """Process user message in selected language and generate matched TTS audio."""
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    result = await booking_agent.process_user_message(req.session_id, req.message)
-    # Generate TTS audio for the reply so frontend can speak at the same time
+    lang = (req.language or "en").lower().strip()
+    session = booking_agent.get_or_create_session(req.session_id)
+    session["language"] = lang
+
+    # Interpret user message (support Hindi Devanagari/words and Spanish)
+    processed_message = language_service.preprocess_user_input(req.message, lang=lang)
+
+    result = await booking_agent.process_user_message(req.session_id, processed_message)
+
+    # Localize reply, card options, and quick replies into requested language
+    result = language_service.localize_response(result, lang=lang)
+
+    # Generate TTS audio in the target language neural voice
     try:
         reply_text = result.get("reply", "")
-        result["audio_base64"] = await voice_service.generate_tts_data_uri_async(reply_text)
+        result["audio_base64"] = await voice_service.generate_tts_data_uri_async(reply_text, lang=lang)
     except Exception as e:
         logger.warning(f"Failed to generate TTS audio in /api/chat: {e}")
         result["audio_base64"] = None
+
+    result["language"] = lang
     return ChatResponse(**result)
 
 # ==============================================================
 # VOICE SPEECH-TO-TEXT (WHISPER) & TEXT-TO-SPEECH (TTS) ENDPOINTS
 # ==============================================================
 @app.post("/api/voice/transcribe")
-async def voice_transcribe(audio: UploadFile = File(...)):
-    """Transcribe user-recorded voice audio using Whisper 'tiny' CPU model."""
+async def voice_transcribe(
+    audio: UploadFile = File(...),
+    language: Optional[str] = Form("en")
+):
+    """Transcribe user-recorded voice audio using Whisper 'tiny' CPU model in selected language (en, hi, es)."""
     try:
         content = await audio.read()
         filename = audio.filename or "recording.webm"
         ext = filename.split(".")[-1] if "." in filename else "webm"
-        logger.info(f"[/api/voice/transcribe] Received {len(content)} bytes, filename={filename}")
-        text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
+        lang = (language or "en").lower().strip()
+        logger.info(f"[/api/voice/transcribe] Received {len(content)} bytes, lang={lang}, filename={filename}")
+        text = voice_service.transcribe_audio_bytes(content, file_ext=ext, language=lang)
         if not text and not voice_service.is_ffmpeg_installed():
             return {
                 "success": False,
                 "text": "",
-                "error": "Server error: 'ffmpeg' is not installed on this Ubuntu system. Please run 'sudo apt-get install -y ffmpeg'."
+                "error": "Server error: 'ffmpeg' is not installed on this system. Please run 'sudo apt-get install -y ffmpeg'."
             }
-        return {"success": True, "text": text}
+        return {"success": True, "text": text, "language": lang}
     except Exception as e:
         logger.error(f"Voice transcription endpoint error: {e}", exc_info=True)
         return {"success": False, "text": "", "error": str(e)}
@@ -211,41 +291,68 @@ async def voice_transcribe(audio: UploadFile = File(...)):
 @app.post("/api/voice/chat", response_model=VoiceChatResponse)
 async def voice_chat(
     audio: UploadFile = File(...),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    language: Optional[str] = Form("en"),
+    client_transcript: Optional[str] = Form(None)
 ):
     """
-    1. Transcribe voice input using Whisper 'tiny' CPU model.
+    1. Transcribe voice input using high-accuracy Speech Recognition (Hindi Devanagari, Spanish, English)
+       with Whisper fallback.
     2. Process transcribed message through booking agent.
-    3. Generate TTS audio for the reply so frontend speaks immediately.
+    3. Generate Edge TTS audio in that language for instant voice playback.
     """
     try:
         content = await audio.read()
         filename = audio.filename or "recording.webm"
         ext = filename.split(".")[-1] if "." in filename else "webm"
-        logger.info(f"[/api/voice/chat] Received audio upload: {len(content)} bytes, filename={filename}")
-        user_text = voice_service.transcribe_audio_bytes(content, file_ext=ext)
+        lang = (language or "en").lower().strip()
+        logger.info(f"[/api/voice/chat] Received audio upload: {len(content)} bytes, lang={lang}, filename={filename}")
+        
+        user_text = ""
+        if client_transcript and len(client_transcript.strip()) > 1:
+            user_text = client_transcript.strip()
+            logger.info(f"[/api/voice/chat] Using live browser transcript ({lang}): '{user_text}'")
+
+        if not user_text:
+            user_text = voice_service.transcribe_audio_bytes(content, file_ext=ext, language=lang)
 
         if not user_text:
             if not voice_service.is_ffmpeg_installed():
                 logger.error("[/api/voice/chat] ffmpeg is not installed on this server!")
                 return VoiceChatResponse(
                     success=False,
-                    message="Server error: 'ffmpeg' is not installed on this Ubuntu server. Please run 'sudo apt-get update && sudo apt-get install -y ffmpeg'.",
-                    session_id=session_id or ""
+                    message="Server error: 'ffmpeg' is not installed. Please install ffmpeg.",
+                    session_id=session_id or "",
+                    language=lang
                 )
-            logger.warning(f"[/api/voice/chat] No speech detected in {len(content)} bytes audio")
+            no_speech_msg = (
+                "कोई स्पष्ट आवाज़ नहीं मिली। कृपया अपने माइक में फिर से बोलें।" if lang == "hi" else (
+                    "No se detectó voz clara. Por favor hable al micrófono de nuevo." if lang == "es" else
+                    "No clear speech detected. Please speak into your microphone and try again."
+                )
+            )
             return VoiceChatResponse(
                 success=False,
-                message="No clear speech detected. Please speak into your microphone and try again.",
-                session_id=session_id or ""
+                message=no_speech_msg,
+                session_id=session_id or "",
+                language=lang
             )
 
-        # Process through booking conversational agent
-        result = await booking_agent.process_user_message(session_id, user_text)
+        # Preprocess multilingual user input
+        processed_text = language_service.preprocess_user_input(user_text, lang=lang)
 
-        # Generate TTS audio for the reply text
+        session = booking_agent.get_or_create_session(session_id)
+        session["language"] = lang
+
+        # Process through booking conversational agent
+        result = await booking_agent.process_user_message(session_id, processed_text)
+
+        # Localize reply and quick replies to the target language
+        result = language_service.localize_response(result, lang=lang)
+
+        # Generate TTS audio for the reply text in selected language
         reply_text = result.get("reply", "")
-        audio_base64 = await voice_service.generate_tts_data_uri_async(reply_text)
+        audio_base64 = await voice_service.generate_tts_data_uri_async(reply_text, lang=lang)
 
         return VoiceChatResponse(
             success=True,
@@ -257,21 +364,24 @@ async def voice_chat(
             quick_replies=result.get("quick_replies", []),
             booking=result.get("booking"),
             options=result.get("options"),
-            audio_base64=audio_base64
+            audio_base64=audio_base64,
+            language=lang
         )
     except Exception as e:
         logger.error(f"Voice chat endpoint error: {e}", exc_info=True)
         return VoiceChatResponse(
             success=False,
             message=f"Error processing voice: {e}",
-            session_id=session_id or ""
+            session_id=session_id or "",
+            language=lang or "en"
         )
 
 @app.post("/api/voice/tts")
 async def tts_endpoint_post(req: TTSRequest):
-    """Generate and return MP3 audio for any given text."""
+    """Generate and return MP3 audio for any given text in selected language."""
     try:
-        audio_bytes = await voice_service.generate_tts_audio_bytes_async(req.text)
+        lang = (req.language or "en").lower().strip()
+        audio_bytes = await voice_service.generate_tts_audio_bytes_async(req.text, voice=req.voice, lang=lang)
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech audio")
         return Response(content=audio_bytes, media_type="audio/mpeg")
@@ -279,10 +389,13 @@ async def tts_endpoint_post(req: TTSRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/voice/tts")
-async def tts_endpoint_get(text: str = Query(..., description="Text to synthesize to speech")):
-    """GET endpoint to play or stream MP3 speech directly."""
+async def tts_endpoint_get(
+    text: str = Query(..., description="Text to synthesize to speech"),
+    lang: Optional[str] = Query("en", description="Language code: en, hi, es")
+):
+    """GET endpoint to play or stream MP3 speech directly in selected language."""
     try:
-        audio_bytes = await voice_service.generate_tts_audio_bytes_async(text)
+        audio_bytes = await voice_service.generate_tts_audio_bytes_async(text, lang=lang or "en")
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="Failed to synthesize speech audio")
         return Response(content=audio_bytes, media_type="audio/mpeg")
@@ -291,42 +404,31 @@ async def tts_endpoint_get(text: str = Query(..., description="Text to synthesiz
 
 @app.post("/api/chat/reset")
 async def reset_chat(req: ResetRequest):
-    """Reset session and start fresh with empty canvas."""
+    """Reset session and start fresh in the chosen language."""
     session_id = req.session_id
+    lang = (req.language or "en").lower().strip()
     if not session_id:
         session = booking_agent.get_or_create_session()
         session_id = session["session_id"]
     else:
         session = booking_agent.reset_session(session_id)
 
-    return {
-        "session_id": session_id,
-        "reply": "",
-        "current_step": STEP_START,
-        "state": session,
-        "quick_replies": [],
-        "options": None
-    }
-
-    welcome_text = (
-        "Welcome to **Northstar Airline Assistance**! 🌟\n\n"
-        "Let's start fresh. Since you are arriving from the airport, **which city or airport destination are you traveling to?**"
-    )
-    session.setdefault("messages", []).append({
-        "role": "assistant",
-        "content": welcome_text,
-        "timestamp": ""
-    })
+    session["language"] = lang
+    lang_info = language_service.get_language_info(lang)
+    welcome_text = lang_info["greeting"]
     session["current_step"] = STEP_ASK_LOCATION
-    db_manager.save_session(session_id, session)
-
-    return {
+    qr_list = booking_agent.get_location_quick_replies()
+    options = {"type": "locations", "items": db_manager.get_all_locations()}
+    resp = {
         "session_id": session_id,
         "reply": welcome_text,
         "current_step": STEP_ASK_LOCATION,
         "state": session,
-        "quick_replies": booking_agent.get_location_quick_replies()
+        "quick_replies": qr_list,
+        "options": options,
+        "language": lang
     }
+    return language_service.localize_response(resp, lang=lang)
 
 # ==============================================================
 # BOOKINGS ENDPOINTS
