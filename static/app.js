@@ -688,7 +688,18 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
     if (audioBase64) {
       playAudio(audioBase64);
     } else {
-      speakViaBrowserTTS(text);
+      // Stream server female neural audio first, fallback to strict female browser TTS
+      const cleanSnippet = text.replace(/[*_#`~]/g, '').trim().substring(0, 220);
+      const audioUrl = `/api/voice/tts?text=${encodeURIComponent(cleanSnippet)}&lang=${encodeURIComponent(currentLanguage || 'en')}`;
+      const tempAudio = new Audio(audioUrl);
+      tempAudio.oncanplaythrough = () => {
+        stopCurrentAudio();
+        currentAudioPlayer = tempAudio;
+        tempAudio.play().catch(() => speakViaBrowserTTS(text));
+      };
+      tempAudio.onerror = () => {
+        speakViaBrowserTTS(text);
+      };
     }
   }
 }
@@ -1229,6 +1240,73 @@ function stopCurrentAudio() {
   }
 }
 
+// Preload and cache speech synthesis voices so they are ready immediately
+let cachedSpeechVoices = [];
+function reloadSpeechVoices() {
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    cachedSpeechVoices = window.speechSynthesis.getVoices() || [];
+  }
+}
+if (typeof window !== "undefined" && window.speechSynthesis) {
+  reloadSpeechVoices();
+  window.speechSynthesis.onvoiceschanged = reloadSpeechVoices;
+}
+
+function getStrictFemaleVoice(targetLang) {
+  let voices = cachedSpeechVoices;
+  if (!voices || voices.length === 0) {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      voices = window.speechSynthesis.getVoices() || [];
+      cachedSpeechVoices = voices;
+    }
+  }
+  if (!voices || voices.length === 0) return null;
+
+  const shortLang = (targetLang || "en").toLowerCase().split("-")[0];
+  const maleKeywords = [
+    "david", "mark", "ravi", "george", "guy", "jorge", "pablo", "diego",
+    "madhav", "stefan", "cosimo", "richard", "james", "john", "paul",
+    "mike", "steve", "male", "hombre", "varon"
+  ];
+  const femaleKeywords = [
+    "zira", "heera", "aria", "jenny", "swara", "elvira", "samantha", "victoria",
+    "karen", "susan", "eva", "monica", "paulina", "kalpana", "veena",
+    "hazel", "helena", "laura", "alva", "lucia", "sabina", "martha", "elena", "female"
+  ];
+
+  // 1. Language match + Explicit female keyword (and strictly not male)
+  let selected = voices.find(v => {
+    const vName = (v.name || "").toLowerCase();
+    const vLang = (v.lang || "").toLowerCase();
+    const isLang = vLang === targetLang.toLowerCase() || vLang.startsWith(shortLang);
+    return isLang && femaleKeywords.some(k => vName.includes(k)) && !maleKeywords.some(k => vName.includes(k));
+  });
+  if (selected) return selected;
+
+  // 2. Language match + strictly not male
+  selected = voices.find(v => {
+    const vName = (v.name || "").toLowerCase();
+    const vLang = (v.lang || "").toLowerCase();
+    const isLang = vLang === targetLang.toLowerCase() || vLang.startsWith(shortLang);
+    return isLang && !maleKeywords.some(k => vName.includes(k));
+  });
+  if (selected) return selected;
+
+  // 3. ANY female voice on the system regardless of language (e.g. Zira, Heera)
+  selected = voices.find(v => {
+    const vName = (v.name || "").toLowerCase();
+    return femaleKeywords.some(k => vName.includes(k)) && !maleKeywords.some(k => vName.includes(k));
+  });
+  if (selected) return selected;
+
+  // 4. Any voice that does NOT contain male keywords
+  selected = voices.find(v => {
+    const vName = (v.name || "").toLowerCase();
+    return !maleKeywords.some(k => vName.includes(k));
+  });
+  return selected;
+}
+
 function speakViaBrowserTTS(text) {
   if (!window.speechSynthesis) return;
   stopCurrentAudio();
@@ -1240,11 +1318,20 @@ function speakViaBrowserTTS(text) {
       .replace(/[\u2000-\u3300]/gu, '')
       .replace(/[•\-\*\+]/g, '')
       .trim();
-    const utterance = new SpeechSynthesisUtterance(clean.substring(0, 320));
+    const utterance = new SpeechSynthesisUtterance(clean.substring(0, 260));
     const langCfg = LANG_CONFIG[currentLanguage] || LANG_CONFIG.en;
+    const targetLang = (langCfg.browserVoice || "en-US").toLowerCase();
+
     utterance.lang = langCfg.browserVoice || "en-US";
     utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    // Higher pitch guarantees a pleasant female timbre
+    utterance.pitch = 1.35;
+
+    const femaleVoice = getStrictFemaleVoice(targetLang);
+    if (femaleVoice) {
+      utterance.voice = femaleVoice;
+    }
+
     window.speechSynthesis.speak(utterance);
   } catch (e) {
     console.warn("Browser speech synthesis error:", e);

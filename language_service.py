@@ -702,8 +702,54 @@ def localize_response(result: Dict[str, Any], lang: str = "en") -> Dict[str, Any
 
     localized_reply = None
 
+    # 0. If original reply already contains Devanagari script (Hindi), preserve it!
+    if target_lang == "hi" and any(0x0900 <= ord(c) <= 0x097F for c in original_reply):
+        localized_reply = original_reply
+
+    # 0.1 If original reply is dynamic inquiry answer (weather, search, joke, recommendation, details), preserve it!
+    elif any(sym in original_reply for sym in ["🌤️", "💡", "📚", "🔍", "Current Weather", "travel chuckle", "chuckle", "Why don't hotels ever get lonely"]):
+        localized_reply = original_reply
+
+    # 0.2 If original reply contains multi-entity acknowledgment, localize acknowledgment gracefully
+    elif "Understood! I've noted" in original_reply:
+        if target_lang == "hi":
+            hi_ack = original_reply
+            hi_ack = hi_ack.replace("Understood! I've noted", "समझ गया! मैंने नोट कर लिया है:")
+            hi_ack = hi_ack.replace("Destination:", "गंतव्य:")
+            hi_ack = hi_ack.replace("Duration:", "ठहरने की अवधि:")
+            hi_ack = hi_ack.replace("nights", "रातें")
+            hi_ack = hi_ack.replace("Vehicle:", "वाहन:")
+            hi_ack = hi_ack.replace("Pick-up & Drop", "पिकअप और ड्रॉप")
+            hi_ack = hi_ack.replace("Pick-up", "पिकअप")
+            hi_ack = hi_ack.replace("Drop-off", "ड्रॉप")
+            hi_ack = hi_ack.replace("Hotel:", "होटल:")
+            hi_ack = hi_ack.replace("Room:", "कमरा:")
+            hi_ack = hi_ack.replace("Food:", "भोजन:")
+            hi_ack = hi_ack.replace("Included", "शामिल")
+            hi_ack = hi_ack.replace("Room Only", "सिर्फ कमरा")
+            hi_ack = hi_ack.replace("We have luxury properties connected to", "हमारे पास यहाँ उत्कृष्ट लक्ज़री संपत्तियां उपलब्ध हैं:")
+            hi_ack = hi_ack.replace("Which hotel would you prefer to stay at?", "आप किस होटल में ठहरना पसंद करेंगे?")
+            localized_reply = hi_ack
+        elif target_lang == "es":
+            es_ack = original_reply
+            es_ack = es_ack.replace("Understood! I've noted", "¡Entendido! He registrado:")
+            es_ack = es_ack.replace("Destination:", "Destino:")
+            es_ack = es_ack.replace("Duration:", "Duración:")
+            es_ack = es_ack.replace("nights", "noches")
+            es_ack = es_ack.replace("Vehicle:", "Vehículo:")
+            es_ack = es_ack.replace("Pick-up & Drop", "Recogida y traslado")
+            es_ack = es_ack.replace("Pick-up", "Recogida")
+            es_ack = es_ack.replace("Drop-off", "Traslado")
+            es_ack = es_ack.replace("Hotel:", "Hotel:")
+            es_ack = es_ack.replace("Room:", "Habitación:")
+            es_ack = es_ack.replace("Food:", "Comida:")
+            es_ack = es_ack.replace("Included", "Incluida")
+            es_ack = es_ack.replace("Room Only", "Solo habitación")
+            es_ack = es_ack.replace("Which hotel would you prefer to stay at?", "¿En qué hotel te gustaría alojarte?")
+            localized_reply = es_ack
+
     # 1. Check for Completed Booking
-    if current_step == "COMPLETED" or "Reservation Confirmed!" in original_reply or "Booking Reference" in original_reply:
+    elif current_step == "COMPLETED" or "Reservation Confirmed!" in original_reply or "Booking Reference" in original_reply:
         localized_reply = format_completed_booking_localized(state, target_lang)
 
     # 2. Check for Confirmation Review Card

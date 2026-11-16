@@ -434,6 +434,124 @@ def check_hotel_inquiry(text: str) -> Optional[str]:
 
     return None
 
+def is_general_or_search_inquiry(text: str) -> bool:
+    """
+    Detect if user is asking a general knowledge question, requesting live web search,
+    asking for weather/attractions, or engaging in friendly chit-chat (greetings, jokes, identity).
+    """
+    if not text:
+        return False
+    t = text.lower().strip()
+
+    # Direct booking intent should NEVER be hijacked by general inquiry
+    booking_actions = ["book", "reserve", "reservation", "confirm", "proceed", "cancel", "check-in date", "checkout date"]
+    if any(k in t for k in booking_actions):
+        return False
+
+    # 1. Chit-chat & Greetings
+    chitchat_exact = ["hi", "hello", "hey", "hola", "namaste", "नमस्ते", "good morning", "good evening", "good afternoon"]
+    if t in chitchat_exact or any(t.startswith(g + " ") for g in ["hi", "hello", "hey"]):
+        return True
+    if any(k in t for k in ["how are you", "how r u", "how are you doing", "how are things", "how's it going", "आप कैसे हैं", "कैसे हो", "como estas", "cómo estás"]):
+        return True
+    if any(k in t for k in ["who are you", "what are you", "who made you", "what is your name", "what can you do", "who created you", "आप कौन हैं", "quien eres", "quién eres"]):
+        return True
+    if any(k in t for k in ["tell me a joke", "tell a joke", "make me laugh", "say something funny", "चुटकुला", "chiste", "funny joke"]):
+        return True
+    if any(k in t for k in ["thank you", "thanks a lot", "thanks", "धन्यवाद", "gracias", "you are great", "good job", "awesome"]) and len(t.split()) <= 5:
+        return True
+
+    # 2. Weather & Forecast
+    if any(k in t for k in ["weather", "temperature", "forecast", "is it raining", "is it cold", "rain today", "मौसम", "clima", "tiempo en"]):
+        return True
+
+    # 3. Explicit Web Search Intent
+    if any(k in t for k in ["search for", "search on google", "web search", "search about", "look up", "google for me", "find online", "can you search", "google it"]):
+        return True
+
+    # 4. Travel, Attractions, Dining, Sightseeing, City Information
+    if any(k in t for k in [
+        "places to visit", "attractions", "things to do", "sightseeing", "best places", "what to see",
+        "tourist spots", "tourist attractions", "good restaurants", "best food", "top things", "museums",
+        "nightlife", "distance from", "distance between", "how far is", "subway from", "flight status", "airline status"
+    ]):
+        return True
+
+    # 5. Open-ended questions asking for information or facts
+    if ("?" in t or any(t.startswith(q + " ") for q in ["what", "who", "where", "why", "how", "when", "tell me about"])) and not any(
+        b in t for b in ["room", "hotel", "rooms", "check-in", "checkin", "check-out", "checkout", "night", "nights", "vehicle", "cab"]
+    ):
+        return True
+
+    return False
+
+def perform_live_web_search(query: str) -> Optional[str]:
+    """
+    Perform a live Google search via SerpApi and format a warm, natural answer
+    from answer boxes, knowledge graph, and organic search snippets.
+    """
+    if not settings.SERPAPI_API_KEY:
+        return None
+    try:
+        resp = httpx.get(
+            "https://serpapi.com/search.json",
+            params={"q": query, "api_key": settings.SERPAPI_API_KEY, "num": 4},
+            timeout=8.0
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+
+        # 1. Answer Box (Weather, Direct Definition, Sports, Calculator)
+        ans = data.get("answer_box")
+        if ans:
+            if ans.get("type") == "weather_result":
+                temp = ans.get("temperature", "")
+                unit = ans.get("unit", "")
+                weather = ans.get("weather", "")
+                loc = ans.get("location", "")
+                humidity = ans.get("humidity", "")
+                wind = ans.get("wind", "")
+                return (
+                    f"🌤️ **Current Weather for {loc}**:\n"
+                    f"• **Condition**: {weather}\n"
+                    f"• **Temperature**: {temp}° {unit}\n"
+                    f"• **Humidity**: {humidity} | **Wind**: {wind}"
+                )
+            if ans.get("answer"):
+                return f"💡 **Direct Answer**: {ans.get('answer')}"
+            if ans.get("snippet"):
+                return f"💡 {ans.get('snippet')}"
+
+        # 2. Knowledge Graph (Landmarks, Places, People, Companies)
+        kg = data.get("knowledge_graph")
+        if kg:
+            title = kg.get("title", "")
+            desc = kg.get("description", "")
+            t_type = kg.get("type", "")
+            if desc:
+                header = f"📚 **{title}**" if title else "📚 **Information**"
+                if t_type:
+                    header += f" *({t_type})*"
+                return f"{header}\n\n{desc}"
+
+        # 3. Organic Web Results
+        organic = data.get("organic_results", [])
+        if organic:
+            lines = ["🔍 **Here is what I found on the web**:"]
+            for item in organic[:3]:
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+                if snippet:
+                    lines.append(f"• **{title}**: {snippet}")
+            if len(lines) > 1:
+                return "\n\n".join(lines)
+
+        return None
+    except Exception as e:
+        logger.warning(f"SerpApi search error for '{query}': {e}")
+        return None
+
 def is_inquiring_about_rooms(text: str) -> bool:
     t = text.lower().strip()
     patterns = [
@@ -1355,70 +1473,66 @@ def extract_room_count(text: str) -> Optional[int]:
         if 1 <= val <= 30:
             return val
 
-    # 2. Hindi & Spanish specific room phrases:
-    # "दो कमरे", "दो कमरों", "2 कमरे", "1 कमरा", "हमें दो कमरों की जरूरत", "2 habitaciones"
-    hi_match = re.search(r'(\d+)\s*(?:कमरे|कमरा|कमरों|रूम|रू्म|habitaci[oó]n(?:es)?)', t)
+    # 2. Hindi & Spanish & English specific room phrases:
+    # "दो कमरे", "दो कमरों", "2 कमरे", "1 कमरा", "हमें दो कमरों की जरूरत", "2 habitaciones", "2 rooms"
+    hi_match = re.search(r'(\d+)\s*(?:कमरे|कमरा|कमरों|रूम|रू्म|habitaci[oó]n(?:es)?|rooms?)', t)
     if hi_match:
         val = int(hi_match.group(1))
         if 1 <= val <= 30:
             return val
 
     for w, val in NUMBER_WORDS.items():
-        if re.search(rf'{re.escape(w)}\s*(?:कमरे|कमरा|कमरों|रूम|रू्म|habitaci[oó]n(?:es)?)', t):
+        if re.search(rf'{re.escape(w)}\s*(?:कमरे|कमरा|कमरों|रूम|रू्म|habitaci[oó]n(?:es)?|rooms?)', t):
             return val
 
-    # 3. English patterns
+    # 3. Explicit room request phrases in English: e.g. "make it 2", "need 2 rooms"
     patterns = [
         r'\b(\d+)\s*(?:is enough|only|rooms?|please)\b',
-        r'\b(?:make it|change to|just|only|want|need|give me|book|reserve)\s*(\d+)\b',
-        r'\b(\d+)\s+rooms?\b'
+        r'\b(?:make it|change to|just|only|want|need|give me|book|reserve)\s*(\d+)\s*(?:rooms?)?\b',
     ]
     for p in patterns:
         m = re.search(p, t)
         if m:
             val = int(m.group(1))
             if 1 <= val <= 30:
-                return val
+                trailing = t[m.end():m.end()+18]
+                if not re.search(r'^\s*(?:days?|nights?|guests?|members?|people|persons?|pax|रात|दिन|noches|dias)', trailing):
+                    return val
 
     for w, val in NUMBER_WORDS.items():
         is_ascii = all(ord(c) < 128 for c in w)
         boundary_pat = rf'\b{w}\s*(?:is enough|only|rooms?|please)\b' if is_ascii else rf'{re.escape(w)}\s*(?:is enough|only|rooms?|please)'
         if re.search(boundary_pat, t):
             return val
-        boundary_pat2 = rf'\b(?:make it|change to|just|only|want|need|give me|book|reserve)\s*{w}\b' if is_ascii else rf'(?:make it|change to|just|only|want|need|give me|book|reserve)\s*{re.escape(w)}'
-        if re.search(boundary_pat2, t):
-            return val
+        boundary_pat2 = rf'\b(?:make it|change to|just|only|want|need|give me|book|reserve)\s*{w}\s*(?:rooms?)?\b' if is_ascii else rf'(?:make it|change to|just|only|want|need|give me|book|reserve)\s*{re.escape(w)}'
+        m2 = re.search(boundary_pat2, t)
+        if m2:
+            trailing = t[m2.end():m2.end()+18]
+            if not re.search(r'^\s*(?:days?|nights?|guests?|members?|people|persons?|pax|रात|दिन|noches|dias)', trailing):
+                return val
 
     # 4. Bare digits (e.g. "1", "2", "3")
-    clean_digits = re.sub(r'[^\d]', '', t)
-    if clean_digits and t.strip().isdigit() and 1 <= int(t.strip()) <= 30:
+    if t.strip().isdigit() and 1 <= int(t.strip()) <= 30:
         return int(t.strip())
 
-    # 5. Standalone number word or whole string is number word
-    for w, val in NUMBER_WORDS.items():
-        is_ascii = all(ord(c) < 128 for c in w)
-        if is_ascii:
-            if re.search(rf'^\s*{w}\s*$', t):
-                return val
-        else:
-            if w == t or re.search(rf'(?:^|\s){re.escape(w)}(?:$|\s)', t):
+    # 5. Standalone number word or short count answer (<= 3 words, e.g. "two", "दो", "just two")
+    words = t.split()
+    if len(words) <= 3:
+        for w, val in NUMBER_WORDS.items():
+            if w == t or re.search(rf'^\s*{re.escape(w)}\s*$', t):
                 return val
 
-    # 6. Any isolated single/double digit (e.g. "2", "for 2 please")
-    any_digit = re.search(r'\b([1-9]|1\d|20)\b', t)
-    if any_digit:
-        return int(any_digit.group(1))
-
-    # 7. Check if any multilingual number word appears anywhere in text
-    for w, val in NUMBER_WORDS.items():
-        if len(w) >= 2:
-            is_ascii = all(ord(c) < 128 for c in w)
-            if is_ascii:
-                if re.search(rf'\b{w}\b', t):
+    # 6. Isolated digits or words ONLY IF text explicitly mentions room keywords (room/कमरा/habitacion)
+    has_room_kw = any(k in t for k in ['room', 'rooms', 'कमरा', 'कमरे', 'कमरों', 'रूम', 'habitaci'])
+    if has_room_kw:
+        for w, val in NUMBER_WORDS.items():
+            if len(w) >= 2:
+                is_ascii = all(ord(c) < 128 for c in w)
+                if (is_ascii and re.search(rf'\b{w}\b', t)) or (not is_ascii and w in t):
                     return val
-            else:
-                if w in t:
-                    return val
+        any_digit = re.search(r'\b([1-9]|1\d|20)\b', t)
+        if any_digit:
+            return int(any_digit.group(1))
 
     return None
 
@@ -2373,6 +2487,129 @@ class BookingAgent:
 
         return None
 
+    def handle_general_inquiry_or_web_search(self, user_text: str, session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Respond warmly and helpfully to general questions, friendly chit-chat (greetings, jokes, compliments),
+        and real-world information using SerpApi live web search, then seamlessly bridge back to the current booking step.
+        """
+        t = user_text.lower().strip()
+        ans = None
+
+        # 1. Chit-chat: How are you
+        if any(k in t for k in ["how are you", "how r u", "how are you doing", "how are things", "how's it going", "आप कैसे हैं", "कैसे हो", "como estas", "cómo estás"]):
+            if any(c in t for c in ["आप कैसे", "कैसे हो"]):
+                ans = "मैं बहुत अच्छा हूँ, पूछने के लिए धन्यवाद! 😊 आशा है आपका दिन भी शानदार बीत रहा होगा।"
+            elif any(c in t for c in ["como", "cómo"]):
+                ans = "¡Estoy excelente, muchas gracias por preguntar! 😊 Espero que tengas un día maravilloso."
+            else:
+                ans = "I'm doing wonderfully, thank you for asking! 😊 I'm always happy to assist with your travel and hotel arrangements."
+
+        # 2. Chit-chat: Who are you / Capabilities
+        elif any(k in t for k in ["who are you", "what are you", "who made you", "what is your name", "what can you do", "who created you", "आप कौन हैं", "quien eres", "quién eres"]):
+            if "आप कौन" in t:
+                ans = "मैं **Northstar AI Assistant** हूँ 🌟—आपकी व्यक्तिगत 5-स्टार लक्ज़री होटल और यात्रा सहायक। मैं होटल बुकिंग, कमरे के चयन, एयरपोर्ट ट्रांसफर, मौसम और लाइव वेब खोज में आपकी मदद कर सकती हूँ!"
+            elif any(c in t for c in ["quien", "quién"]):
+                ans = "¡Soy el **Northstar AI Assistant** 🌟, tu conserje digital de hoteles de lujo! Puedo ayudarte con reservas, traslados al aeropuerto, información meteorológica y búsquedas en la web."
+            else:
+                ans = "I am the **Northstar AI Assistant** 🌟, your dedicated luxury hotel and travel concierge. I can help you find 5-star properties, customize suites, organize airport chauffeur transfers, check live weather, and search the web for any travel recommendations!"
+
+        # 3. Chit-chat: Joke
+        elif any(k in t for k in ["joke", "चुटकुला", "chiste", "laugh", "funny"]):
+            if "चुटकुला" in t:
+                ans = "😄 एक बार एक होटल मैनेजर ने गेस्ट से पूछा: 'सर, कमरा कैसा लगा?'\nगेस्ट बोला: 'बहुत बढ़िया! बस आईना थोड़ा अजीब है, उसमें सिर्फ मैं ही दिखता हूँ!' 🏨✨"
+            elif "chiste" in t:
+                ans = "😄 ¿Por qué los hoteles nunca se sienten solos?\n¡Porque siempre están llenos de huéspedes! 🏨✨"
+            else:
+                ans = "😄 Here's a travel chuckle for you:\n*Why don't hotels ever get lonely?*\n*Because they're always full of guests!* 🏨✨"
+
+        # 4. Chit-chat: Compliment / Thanks
+        elif any(k in t for k in ["thank you", "thanks a lot", "thanks", "धन्यवाद", "gracias", "awesome", "great job", "you are great"]) and len(t.split()) <= 5:
+            if "धन्यवाद" in t:
+                ans = "आपका बहुत-बहुत स्वागत है! 😊 आपकी सहायता करना मेरा सौभाग्य है।"
+            elif "gracias" in t:
+                ans = "¡De nada! Es un placer ayudarte. 😊"
+            else:
+                ans = "You're very welcome! It's an absolute pleasure helping you. 😊"
+
+        # 5. Greetings
+        elif t in ["hi", "hello", "hey", "hola", "namaste", "नमस्ते", "good morning", "good evening", "good afternoon"] or any(t.startswith(g + " ") for g in ["hi", "hello", "hey"]):
+            if any(c in t for c in ["namaste", "नमस्ते"]):
+                ans = "नमस्ते! 🌟 Northstar में आपका स्वागत है। मैं आपकी क्या सेवा कर सकती हूँ?"
+            elif any(c in t for c in ["hola"]):
+                ans = "¡Hola! 🌟 Bienvenido a Northstar. ¿En qué te puedo ayudar hoy?"
+            else:
+                ans = "Hello and welcome! 🌟 I'm your Northstar travel assistant. How can I assist you today?"
+
+        # 6. Live Web Search for General Inquiries, Weather, Attractions, and Factual Questions
+        if not ans:
+            search_query = re.sub(r'^(?:can you\s+)?(?:search for|search on google|search about|search|look up|google for me|google it|google|find online|find|tell me about)\s+', '', t, flags=re.I).strip(' ?')
+            if not search_query:
+                search_query = t.strip(' ?')
+
+            # Add context destination city if user asks about weather/places without naming the city
+            if session.get("location_city") and not any(city in search_query.lower() for city in [session["location_city"].lower(), "new york", "los angeles", "chicago", "miami", "delhi", "mumbai", "san francisco", "las vegas"]):
+                if any(k in search_query for k in ["weather", "temperature", "attractions", "places", "food", "restaurants"]):
+                    search_query += f" in {session['location_city']}"
+
+            search_result = perform_live_web_search(search_query)
+            if search_result:
+                ans = search_result
+            else:
+                ans = f"I looked up information regarding **{search_query}**. Let me know if you need specific details or recommendations!"
+
+        # Bridge smoothly back to current booking step
+        curr_step = session.get("current_step", STEP_START)
+        quick_replies = []
+        options_data = None
+
+        if curr_step in [STEP_START, STEP_ASK_LOCATION]:
+            bridge = "\n\nWhenever you're ready, which **city or airport destination** would you like to search hotels for?"
+            quick_replies = self.get_location_quick_replies()
+            options_data = {"type": "locations", "items": db_manager.get_all_locations()}
+        elif curr_step == STEP_ASK_HOTEL:
+            city = session.get("location_city", "your destination")
+            bridge = f"\n\nWhenever you're ready, which hotel in **{city}** would you prefer to stay at?"
+            quick_replies = self.get_hotel_quick_replies(session.get("location_id"))
+            options_data = {"type": "hotels", "city": city, "items": db_manager.get_all_hotels(location_id=session.get("location_id"))}
+        elif curr_step == STEP_ASK_ROOM_TYPE:
+            bridge = f"\n\nWhich room category would you prefer for your stay at **{session.get('hotel_name', 'our hotel')}**?"
+            quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
+            options_data = {"type": "rooms", "hotel_name": session.get("hotel_name"), "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))}
+        elif curr_step == STEP_ASK_ROOMS_COUNT:
+            bridge = f"\n\nHow many rooms would you like to reserve at **{session.get('hotel_name', 'our hotel')}**?"
+            quick_replies = ["1 Room", "2 Rooms", "3 Rooms", "4 Rooms"]
+        elif curr_step == STEP_ASK_MEMBERS_COUNT:
+            bridge = "\n\nHow many guests or members will be staying?"
+            quick_replies = ["1 Guest", "2 Guests", "3 Guests", "4 Guests"]
+        elif curr_step == STEP_ASK_CHECKIN_DATE:
+            bridge = "\n\nWhat date will you be checking in?"
+            quick_replies = ["Today", "Tomorrow", "Coming Thursday", "Next Friday"]
+        elif curr_step == STEP_ASK_CHECKOUT_DATE:
+            bridge = "\n\nHow many nights will you be staying (or what is your check-out date)?"
+            quick_replies = ["1 night", "2 nights", "3 nights", "5 nights"]
+        elif curr_step == STEP_ASK_FOOD:
+            bridge = "\n\nWould you like dining / meals included with your reservation?"
+            quick_replies = ["🍽️ Yes, Include Meals", "❌ Room Only (No Food)"]
+        elif curr_step == STEP_ASK_AIRPORT_VEHICLE:
+            bridge = "\n\nWould you like private airport chauffeur transportation?"
+            quick_replies = ["🚘 Both (Pick-up & Drop)", "🚗 Pick-up Only", "🚕 Drop-off Only", "❌ None / No"]
+        elif curr_step == STEP_ASK_TYPE_AND_NAME:
+            bridge = "\n\nAre you booking as an individual guest or on behalf of a company, and what is your name?"
+            quick_replies = ["Individual Guest", "Corporate / Company"]
+        else:
+            bridge = "\n\nHow else may I assist you with your booking?"
+
+        reply = f"{ans}{bridge}"
+        return {
+            "session_id": session["session_id"],
+            "reply": reply,
+            "current_step": session.get("current_step"),
+            "state": session,
+            "quick_replies": quick_replies,
+            "booking": None,
+            "options": options_data
+        }
+
     def extract_all_entities(self, text: str, session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Extract all possible entities from user text regardless of current conversation step.
@@ -2387,9 +2624,10 @@ class BookingAgent:
             t = normalize_devanagari(t)
 
         # 1. Location
-        loc, l_type, l_score = check_location_match_with_fuzzy(text)
-        if loc and (l_type == 'exact' or l_score >= 0.70):
-            extracted['location'] = loc
+        if not is_general_or_search_inquiry(text):
+            loc, l_type, l_score = check_location_match_with_fuzzy(text)
+            if loc and (l_type == 'exact' or l_score >= 0.70):
+                extracted['location'] = loc
 
         # Check if text is an inquiry asking for details rather than a booking selection
         is_inquiry_phrase = bool(
@@ -2483,33 +2721,76 @@ class BookingAgent:
                 extracted['total_nights'] = calculate_nights(cin, cout)
         else:
             n = extract_nights_or_days(t)
+            if n:
+                extracted['total_nights'] = n
             single_date = parse_flexible_date(text)
             if single_date and n:
                 cin_dt = datetime.strptime(single_date, '%Y-%m-%d')
                 cout_dt = cin_dt + timedelta(days=n)
                 extracted['checkin_date'] = single_date
                 extracted['checkout_date'] = cout_dt.strftime('%Y-%m-%d')
-                extracted['total_nights'] = n
-            elif single_date and any(k in t for k in ['checkin', 'check-in', 'from', 'arrival', 'arriving', 'starting', 'on']):
+            elif single_date and any(k in t for k in ['checkin', 'check-in', 'from', 'arrival', 'arriving', 'starting', 'on', 'book', 'stay']):
                 extracted['checkin_date'] = single_date
 
         # 7. Airport Vehicle
-        if any(k in t for k in ['both', 'pickup and drop', 'pick and drop', 'roundtrip', 'round-trip']):
+        both_vehicle_kw = [
+            'both', 'pickup and drop', 'pick and drop', 'roundtrip', 'round-trip', 'pickup & drop', 'pick & drop',
+            'दोनो', 'दोनों', 'दोनों तरफ', 'ida y vuelta', 'ambos'
+        ]
+        pickup_vehicle_kw = [
+            'pickup only', 'pick up only', 'need pickup', 'pick-up only', 'pickup', 'pick-up', 'pick up',
+            'cab to pickup', 'cab pickup', 'taxi pickup', 'pickup from airport', 'pick up from airport',
+            'pickup from the airport', 'pick up from the airport', 'airport pickup', 'airport pick up',
+            'airport cab', 'airport taxi', 'cab from airport', 'taxi from airport', 'car from airport',
+            'chauffeur pickup', 'airport transfer', 'हवाई अड्डे से पिकअप', 'पिकअप', 'गाड़ी चाहिए', 'recogida', 'recogida del aeropuerto',
+            'cab for pickup', 'car for pickup', 'need cab', 'want cab', 'book cab', 'book a cab'
+        ]
+        drop_vehicle_kw = [
+            'drop only', 'drop off only', 'drop-off only', 'need drop', 'drop', 'drop-off', 'drop off',
+            'cab to drop', 'cab drop', 'taxi drop', 'drop to airport', 'drop at airport', 'airport drop',
+            'drop off at airport', 'हवाई अड्डे तक ड्रॉप', 'ड्रॉप', 'traslado al aeropuerto', 'cab for drop'
+        ]
+        no_vehicle_kw = [
+            'no vehicle', 'no pickup', 'no transfer', 'no chauffeur', 'without vehicle', 'none', 'no cab', 'no taxi',
+            'no thanks', "don't need cab", "dont need cab", "don't need vehicle", "dont need vehicle", "no car",
+            'गाड़ी नहीं चाहिए', 'गाड़ी नहीं', 'कोई गाड़ी नहीं', 'sin vehiculo', 'sin traslado', 'ninguno'
+        ]
+
+        if any(k in t for k in no_vehicle_kw):
+            extracted['airport_pickup'] = False
+            extracted['airport_drop'] = False
+            extracted['vehicle_set'] = True
+        elif any(k in t for k in both_vehicle_kw):
             extracted['airport_pickup'] = True
             extracted['airport_drop'] = True
             extracted['vehicle_set'] = True
-        elif any(k in t for k in ['pickup only', 'pick up only', 'need pickup', 'pick-up only']):
+        elif any(k in t for k in pickup_vehicle_kw):
             extracted['airport_pickup'] = True
             extracted['airport_drop'] = False
             extracted['vehicle_set'] = True
-        elif any(k in t for k in ['drop only', 'drop off only', 'drop-off only', 'need drop']):
+        elif any(k in t for k in drop_vehicle_kw):
             extracted['airport_pickup'] = False
             extracted['airport_drop'] = True
             extracted['vehicle_set'] = True
-        elif any(k in t for k in ['no vehicle', 'no pickup', 'no transfer', 'no chauffeur', 'without vehicle', 'none']):
-            extracted['airport_pickup'] = False
-            extracted['airport_drop'] = False
-            extracted['vehicle_set'] = True
+
+        # 7.1 Food Preference
+        food_positives = [
+            'with food', 'food included', 'include food', 'with meals', 'meals included', 'breakfast included',
+            'need food', 'want food', 'including food', 'including breakfast', 'including meals',
+            'vegetarian', 'veg food', 'खाना शामिल', 'भोजन सहित', 'खाना चाहिए', 'con comida', 'con desayuno'
+        ]
+        food_negatives = [
+            'no food', 'without food', 'room only', "don't need food", "dont need food", 'no meals',
+            'खाना नहीं', 'बिना खाना', 'बिना भोजन', 'sin comida', 'solo habitacion', 'solo habitación'
+        ]
+        if any(k in t for k in food_positives):
+            extracted['food_included'] = True
+            extracted['food_preference'] = "Yes, Food Included"
+            extracted['food_answered'] = True
+        elif any(k in t for k in food_negatives):
+            extracted['food_included'] = False
+            extracted['food_preference'] = "No Food (Room Only)"
+            extracted['food_answered'] = True
 
         # 8. Name / Company / Contact
         comp_m = re.search(r'\b(?:company|firm|org|organization)[:\s]+([A-Za-z0-9\s&]{2,30})', t)
@@ -3080,6 +3361,21 @@ class BookingAgent:
             }
 
         # ==============================================================
+        # 1.58 GENERAL CHIT-CHAT, WEATHER & LIVE WEB SEARCH INTERCEPT
+        # (Answers friendly chit-chat, jokes, weather, and general web inquiries warmly)
+        # ==============================================================
+        if is_general_or_search_inquiry(user_text):
+            search_res = self.handle_general_inquiry_or_web_search(user_text, session)
+            if search_res:
+                session.setdefault("messages", []).append({
+                    "role": "assistant",
+                    "content": search_res["reply"],
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                db_manager.save_session(session["session_id"], session)
+                return search_res
+
+        # ==============================================================
         # 1.6 MULTI-ATTRIBUTE & OUT-OF-ORDER INPUT PROCESSOR
         # (Users providing room first, hotel first, dates first, or everything all-at-once)
         # ==============================================================
@@ -3104,7 +3400,11 @@ class BookingAgent:
                 is_multi_or_out_of_order = True
             elif ("checkin_date" in extracted_entities or "checkout_date" in extracted_entities) and current_step not in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
                 is_multi_or_out_of_order = True
+            elif "total_nights" in extracted_entities and current_step not in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
+                is_multi_or_out_of_order = True
             elif "vehicle_set" in extracted_entities and current_step != STEP_ASK_AIRPORT_VEHICLE:
+                is_multi_or_out_of_order = True
+            elif "food_answered" in extracted_entities and current_step != STEP_ASK_FOOD:
                 is_multi_or_out_of_order = True
             elif ("guest_name" in extracted_entities or "company_name" in extracted_entities) and current_step not in [STEP_ASK_TYPE_AND_NAME, STEP_ASK_COMPANY_NAME]:
                 is_multi_or_out_of_order = True
@@ -3145,6 +3445,10 @@ class BookingAgent:
 
             if "total_nights" in extracted_entities:
                 session["total_nights"] = extracted_entities["total_nights"]
+                if session.get("checkin_date") and not session.get("checkout_date"):
+                    cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                    cout_dt = cin_dt + timedelta(days=session["total_nights"])
+                    session["checkout_date"] = cout_dt.strftime("%Y-%m-%d")
             elif session.get("checkin_date") and session.get("checkout_date"):
                 session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
 
@@ -3152,6 +3456,11 @@ class BookingAgent:
                 session["airport_pickup"] = extracted_entities.get("airport_pickup", False)
                 session["airport_drop"] = extracted_entities.get("airport_drop", False)
                 session["vehicle_answered"] = True
+
+            if "food_answered" in extracted_entities:
+                session["food_included"] = extracted_entities.get("food_included", True)
+                session["food_preference"] = extracted_entities.get("food_preference", "Yes, Food Included")
+                session["food_answered"] = True
 
             if "guest_name" in extracted_entities:
                 session["guest_name"] = extracted_entities["guest_name"]
@@ -3212,6 +3521,11 @@ class BookingAgent:
                 ack_parts.append(f"Room: **{rc} x {session['room_name']}**")
             if session.get("checkin_date") and session.get("checkout_date"):
                 ack_parts.append(f"Stay: **{session['checkin_date']} to {session['checkout_date']}** ({session.get('total_nights', 1)} nights)")
+            elif session.get("total_nights"):
+                ack_parts.append(f"Duration: **{session['total_nights']} nights**")
+            if session.get("food_answered"):
+                f_str = "Included" if session.get("food_included") else "Room Only"
+                ack_parts.append(f"Food: **{f_str}**")
             if session.get("vehicle_answered"):
                 v_str = "Pick-up & Drop" if (session.get("airport_pickup") and session.get("airport_drop")) else ("Pick-up" if session.get("airport_pickup") else ("Drop-off" if session.get("airport_drop") else "None"))
                 ack_parts.append(f"Vehicle: **{v_str}**")
@@ -3807,12 +4121,27 @@ class BookingAgent:
                 session["checkin_date"] = parsed_date
                 d_obj = datetime.strptime(parsed_date, "%Y-%m-%d")
                 date_display = d_obj.strftime("%A, %B %d, %Y")
+
+                # If total_nights was already extracted earlier (e.g. from "stay two days"), auto-set checkout_date!
+                if session.get("total_nights") and not session.get("checkout_date"):
+                    cout_dt = d_obj + timedelta(days=session["total_nights"])
+                    session["checkout_date"] = cout_dt.strftime("%Y-%m-%d")
+
+                if session.get("rooms_count") and session.get("price_per_night") and session.get("total_nights"):
+                    session["total_amount"] = round(session["rooms_count"] * session["price_per_night"] * session["total_nights"], 2)
+
                 next_step = self.determine_next_step(session)
                 session["current_step"] = next_step
+
+                if session.get("checkout_date") and session.get("total_nights"):
+                    prefix = f"Got it! Check-in is set for **{date_display}** (`{parsed_date}`) for **{session['total_nights']} nights** (check-out: `{session['checkout_date']}`).\n\n"
+                else:
+                    prefix = f"Got it! Check-in is set for **{date_display}** (`{parsed_date}`).\n\n"
+
                 reply, quick_replies, options_data = self.prompt_for_step(
                     next_step,
                     session,
-                    extra_prefix=f"Got it! Check-in is set for **{date_display}** (`{parsed_date}`).\n\n"
+                    extra_prefix=prefix
                 )
             else:
                 reply = "Please share your check-in date (for example: 'coming Thursday', 'tomorrow', '2026-11-01', or '29th October')."

@@ -198,7 +198,12 @@ async def initialize_chat(request: ResetRequest):
             "options": options,
             "language": lang
         }
-        return language_service.localize_response(resp, lang=lang)
+        localized = language_service.localize_response(resp, lang=lang)
+        try:
+            localized["audio_base64"] = await voice_service.generate_tts_data_uri_async(localized.get("reply", ""), lang=lang)
+        except Exception:
+            localized["audio_base64"] = None
+        return localized
 
     last_msg = session["messages"][-1]
     welcome_text = last_msg.get("content", "")
@@ -230,7 +235,12 @@ async def initialize_chat(request: ResetRequest):
         "options": options,
         "language": lang
     }
-    return language_service.localize_response(resp, lang=lang)
+    localized = language_service.localize_response(resp, lang=lang)
+    try:
+        localized["audio_base64"] = await voice_service.generate_tts_data_uri_async(localized.get("reply", ""), lang=lang)
+    except Exception:
+        localized["audio_base64"] = None
+    return localized
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_message(req: ChatRequest):

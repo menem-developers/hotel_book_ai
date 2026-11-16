@@ -213,13 +213,14 @@ def clean_text_for_speech(text: str) -> str:
     cleaned = re.sub(r'\.+', '.', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
-    # 7. Truncate if extremely long to maintain fast natural response
-    if len(cleaned) > 500:
-        match = re.search(r'^(.*?[.?!])\s', cleaned[:500])
+    # 7. Truncate to concise natural conversational speech (first 2 sentences or ~220 chars)
+    # This ensures Edge TTS synthesizes in < 2 seconds and sounds snappy
+    if len(cleaned) > 220:
+        match = re.search(r'^(.*?[.?!])\s', cleaned[:220])
         if match:
             cleaned = match.group(1)
         else:
-            cleaned = cleaned[:460].rstrip() + '...'
+            cleaned = cleaned[:200].rstrip(' ,;:-') + '.'
 
     return cleaned
 
@@ -244,12 +245,12 @@ def _run_coroutine_safely(coro):
 async def _synthesize_edge_tts_async(text: str, voice: str) -> bytes:
     """
     Synthesize natural neural speech using edge-tts (no local GPU/heavy model required).
-    Protected with a 10-second timeout to promptly trigger fallback if network hangs.
+    Protected with a 4.0-second timeout to promptly switch to female gTTS if network is slow.
     """
     import edge_tts
     communicate = edge_tts.Communicate(text=text, voice=voice)
     chunks = []
-    async with asyncio.timeout(10.0):
+    async with asyncio.timeout(4.0):
         async for chunk in communicate.stream():
             if chunk.get("type") == "audio":
                 chunks.append(chunk.get("data", b""))
@@ -258,11 +259,11 @@ async def _synthesize_edge_tts_async(text: str, voice: str) -> bytes:
 
 def _synthesize_gtts(text: str, lang: str = "en") -> Optional[bytes]:
     """
-    Fallback synthesis using gTTS in case network/edge-tts is unavailable.
+    Fallback synthesis using gTTS (Google Translate female voice) in case network/edge-tts is unavailable.
     """
     try:
         from gtts import gTTS
-        tts = gTTS(text=text, lang=lang, slow=False)
+        tts = gTTS(text=text, lang=lang, tld="com", slow=False)
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         return fp.getvalue()
