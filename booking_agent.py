@@ -292,15 +292,50 @@ def is_valid_person_name(name: Optional[str]) -> bool:
     name = re.sub(r'\(.*?\)', '', name).strip()
     if len(name) < 2 or len(name) > 35:
         return False
+    lower = name.lower()
+    # Reject booking / transport keywords immediately
+    if re.search(r'\b(cab|taxi|pickup|pick-up|drop|drop-off|airport|terminal|transfer|shuttle|hotel|room|rooms|night|nights|day|days|food|meals?|breakfast|need|want|also|from|and|with|stay|staying)\b', lower):
+        return False
     words = [w.strip() for w in re.split(r'\s+', name) if w.strip()]
     if not (1 <= len(words) <= 3):
         return False
     for w in words:
         w_lower = w.lower()
-        if w_lower in DISALLOWED_NAMES:
+        if w_lower in DISALLOWED_NAMES or w_lower in DISALLOWED_COMPANIES:
             return False
         # Valid Unicode: Devanagari or Latin letters, hyphens, apostrophes, dots
         if not re.match(r'^[\u0900-\u097Fa-zA-Z\.\'-]+$', w):
+            return False
+    return True
+
+def is_valid_company_name(name: Optional[str]) -> bool:
+    """Validate whether an extracted string is a realistic company/organization name."""
+    if not name or not isinstance(name, str):
+        return False
+    name = re.sub(r'\(.*?\)', '', name).strip()
+    if len(name) < 2 or len(name) > 60:
+        return False
+    lower = name.lower()
+    # Reject conversational phrases, booking intents, and transport requests
+    invalid_patterns = [
+        r'\b(cab|taxi|pickup|pick up|pick-up|drop|drop-off|airport|terminal|transfer|shuttle|car)\b',
+        r'\b(hotel|room|rooms|suite|suites|stay|staying|nights?|days?|flight|flights)\b',
+        r'\b(food|meal|meals|breakfast|dinner|lunch|dining)\b',
+        r'\b(need|want|looking|book|booking|reserve|reservation)\b',
+        r'\b(i am|we are|i need|we need|i want|we want|and also|can you|could you|please)\b',
+        r'^(and|also|so|then|or|but|if|because|from|with|to|in|at)\b',
+        r'\b(how many|what is|where is|when is)\b'
+    ]
+    for pat in invalid_patterns:
+        if re.search(pat, lower):
+            return False
+
+    words = [w.strip() for w in re.split(r'\s+', name) if w.strip()]
+    if not (1 <= len(words) <= 5):
+        return False
+    for w in words:
+        w_lower = w.lower()
+        if w_lower in DISALLOWED_NAMES or w_lower in DISALLOWED_COMPANIES:
             return False
     return True
 
@@ -2797,12 +2832,12 @@ class BookingAgent:
         comp_hi = re.search(r'(?:मेरी\s+कंपनी\s+का\s+नाम|कंपनी\s+का\s+नाम|कंपनी\s+है|कंपनी)\s+([^\s,;।?!]+(?:\s+[^\s,;।?!]+){0,3}?)(?:\s+है|\s*[,;।?!]|\s*$)', text, re.I)
         if comp_hi and not comp_m:
             c_cand = clean_company_name(comp_hi.group(0))
-            if len(c_cand) >= 2 and c_cand.lower() not in DISALLOWED_COMPANIES:
+            if is_valid_company_name(c_cand):
                 extracted['company_name'] = c_cand
                 extracted['guest_type'] = 'company'
         elif comp_m:
             c_cand = clean_company_name(comp_m.group(1))
-            if len(c_cand) >= 2 and c_cand.lower() not in DISALLOWED_COMPANIES:
+            if is_valid_company_name(c_cand):
                 extracted['company_name'] = c_cand
                 extracted['guest_type'] = 'company'
 
@@ -2811,7 +2846,7 @@ class BookingAgent:
             r'(?:मेरा\s+नाम|हमारा\s+नाम|mera\s+naam|my\s+name\s+is|name\s+is|call\s+me|this\s+is|me\s+llamo|mi\s+nombre\s+es)\b',
             text, re.I
         ))
-        if cand_name and not extracted.get('company_name'):
+        if cand_name and is_valid_person_name(cand_name) and not extracted.get('company_name'):
             if has_explicit_name_pattern or (session.get("current_step") == STEP_ASK_TYPE_AND_NAME and not extracted.get('hotel') and not extracted.get('location')):
                 extracted['guest_name'] = cand_name
                 # Check if company intent is mentioned alongside the person's name
@@ -2837,6 +2872,22 @@ class BookingAgent:
 
     def determine_next_step(self, session: Dict[str, Any]) -> str:
         """Dynamically find the next missing field in the booking pipeline."""
+        # Auto-compute checkout_date if total_nights and checkin_date exist
+        if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
+            try:
+                cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                session["checkout_date"] = (cin_dt + timedelta(days=int(session["total_nights"]))).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        elif session.get("checkin_date") and session.get("checkout_date") and not session.get("total_nights"):
+            try:
+                session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
+            except Exception:
+                pass
+
+        if session.get("rooms_count") and session.get("price_per_night") and session.get("total_nights"):
+            session["total_amount"] = round(session["rooms_count"] * session["price_per_night"] * session["total_nights"], 2)
+
         if not session.get("location_id"):
             return STEP_ASK_LOCATION
         if not session.get("hotel_id"):
@@ -2960,6 +3011,16 @@ class BookingAgent:
             return reply, ["Today", "Tomorrow", "Coming Thursday", "Next Friday"], None
 
         elif step == STEP_ASK_CHECKOUT_DATE:
+            if session.get("total_nights") and session.get("checkin_date"):
+                try:
+                    cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                    session["checkout_date"] = (cin_dt + timedelta(days=int(session["total_nights"]))).strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+                next_step = self.determine_next_step(session)
+                if next_step != STEP_ASK_CHECKOUT_DATE:
+                    return self.prompt_for_step(next_step, session, extra_prefix=extra_prefix)
+
             cin = session.get("checkin_date")
             reply = (
                 f"{extra_prefix}"
@@ -3445,12 +3506,20 @@ class BookingAgent:
 
             if "total_nights" in extracted_entities:
                 session["total_nights"] = extracted_entities["total_nights"]
-                if session.get("checkin_date") and not session.get("checkout_date"):
+
+            # Harmonize checkin_date, checkout_date, and total_nights
+            if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
+                try:
                     cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
-                    cout_dt = cin_dt + timedelta(days=session["total_nights"])
+                    cout_dt = cin_dt + timedelta(days=int(session["total_nights"]))
                     session["checkout_date"] = cout_dt.strftime("%Y-%m-%d")
+                except Exception:
+                    pass
             elif session.get("checkin_date") and session.get("checkout_date"):
                 session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
+
+            if session.get("rooms_count") and session.get("price_per_night") and session.get("total_nights"):
+                session["total_amount"] = round(session["rooms_count"] * session["price_per_night"] * session["total_nights"], 2)
 
             if "vehicle_set" in extracted_entities:
                 session["airport_pickup"] = extracted_entities.get("airport_pickup", False)
@@ -3914,14 +3983,15 @@ class BookingAgent:
                 session["guest_type"] = "company"
             elif is_individual:
                 session["guest_type"] = "individual"
-            elif extracted_name and not session.get("guest_type"):
+            elif extracted_name and is_valid_person_name(extracted_name) and not session.get("guest_type"):
                 session["guest_type"] = "individual"
 
-            if extracted_name:
+            if extracted_name and is_valid_person_name(extracted_name):
                 cleaned_name = extracted_name.title() if re.search(r'[a-zA-Z]', extracted_name) else extracted_name
-                # Update if not set, or if previous name was invalid, or explicit name statement
-                if not session.get("guest_name") or not is_valid_person_name(session.get("guest_name")) or any(k in user_text.lower() for k in ["मेरा नाम", "mera naam", "my name is", "me llamo", "mi nombre"]):
-                    session["guest_name"] = cleaned_name
+                session["guest_name"] = cleaned_name
+
+            if session.get("guest_name") and not is_valid_person_name(session.get("guest_name")):
+                session["guest_name"] = None
 
             if not session.get("guest_name") and not session.get("guest_type"):
                 reply = "May I have your full name, and are you booking as an individual guest or on behalf of a company?"
@@ -3955,11 +4025,20 @@ class BookingAgent:
         elif current_step == STEP_ASK_COMPANY_NAME:
             comp_name = clean_company_name(user_text)
 
-            if comp_name.lower() in DISALLOWED_COMPANIES or len(comp_name) < 2:
-                reply = "Please let me know the official name of your company or organization."
-                quick_replies = []
+            if not is_valid_company_name(comp_name):
+                # Check if user meant individual booking
+                if any(w in user_text.lower() for w in ["individual", "myself", "personal", "solo", "just me", "private", "no company", "not company"]):
+                    session["guest_type"] = "individual"
+                    session["company_name"] = None
+                    session["current_step"] = STEP_ASK_TYPE_AND_NAME
+                    reply = "Understood! Switching to an individual reservation. May I please have your full name?"
+                    quick_replies = []
+                else:
+                    reply = "Please share the official name of your company or organization (or select '👤 Book as Individual' if you prefer)."
+                    quick_replies = ["👤 Book as Individual", "🏢 Corporate Booking"]
             else:
                 session["company_name"] = comp_name
+                session["guest_type"] = "company"
                 next_step = self.determine_next_step(session)
                 session["current_step"] = next_step
                 reply, quick_replies, options_data = self.prompt_for_step(
@@ -4022,8 +4101,16 @@ class BookingAgent:
 
             if rooms_cnt:
                 session["rooms_count"] = max(1, rooms_cnt)
-                if session.get("room_id") and session.get("price_per_night") and session.get("checkin_date") and session.get("checkout_date"):
+                if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
+                    try:
+                        cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                        session["checkout_date"] = (cin_dt + timedelta(days=int(session["total_nights"]))).strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
+                elif session.get("checkin_date") and session.get("checkout_date"):
                     session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
+
+                if session.get("room_id") and session.get("price_per_night") and session.get("total_nights"):
                     session["total_amount"] = round(session["rooms_count"] * session["price_per_night"] * session["total_nights"], 2)
 
                 next_step = self.determine_next_step(session)
@@ -4060,8 +4147,16 @@ class BookingAgent:
                     session["price_per_night"] = matched_room.get("price_per_night", 100.0)
 
                     rooms_cnt = session.get("rooms_count", 1)
-                    if session.get("checkin_date") and session.get("checkout_date"):
+                    if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
+                        try:
+                            cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                            session["checkout_date"] = (cin_dt + timedelta(days=int(session["total_nights"]))).strftime("%Y-%m-%d")
+                        except Exception:
+                            pass
+                    elif session.get("checkin_date") and session.get("checkout_date"):
                         session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
+
+                    if session.get("total_nights") and session.get("price_per_night"):
                         session["total_amount"] = round(rooms_cnt * session["price_per_night"] * session["total_nights"], 2)
 
                     next_step = self.determine_next_step(session)
@@ -4093,8 +4188,16 @@ class BookingAgent:
                     session["price_per_night"] = matched_room.get("price_per_night", 100.0)
 
                     rooms_cnt = session.get("rooms_count", 1)
-                    if session.get("checkin_date") and session.get("checkout_date"):
+                    if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
+                        try:
+                            cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                            session["checkout_date"] = (cin_dt + timedelta(days=int(session["total_nights"]))).strftime("%Y-%m-%d")
+                        except Exception:
+                            pass
+                    elif session.get("checkin_date") and session.get("checkout_date"):
                         session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
+
+                    if session.get("total_nights") and session.get("price_per_night"):
                         session["total_amount"] = round(rooms_cnt * session["price_per_night"] * session["total_nights"], 2)
 
                     next_step = self.determine_next_step(session)
