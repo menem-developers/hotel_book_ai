@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     message: str
     language: Optional[str] = "en"
+    tts_enabled: Optional[bool] = True
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -51,6 +52,7 @@ class TTSRequest(BaseModel):
 class ResetRequest(BaseModel):
     session_id: Optional[str] = None
     language: Optional[str] = "en"
+    tts_enabled: Optional[bool] = True
 
 class LocationModel(BaseModel):
     location_id: Optional[str] = None

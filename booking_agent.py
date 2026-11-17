@@ -104,7 +104,10 @@ NON_NAME_WORDS = DISALLOWED_NAMES
 
 DISALLOWED_COMPANIES = {
     "yes", "no", "ok", "okay", "sure", "yep", "yeah", "nope", "hi", "hello",
-    "founder", "ceo", "director", "manager", "admin", "owner", "president"
+    "founder", "ceo", "director", "manager", "admin", "owner", "president",
+    "company", "corporate", "individual", "business", "organization", "firm",
+    "comapny", "cmpany", "copmany", "compnay", "org", "guest", "none", "skip",
+    "today", "tomorrow", "yesterday"
 }
 
 HOTEL_FAQ_KNOWLEDGE = {
@@ -324,7 +327,8 @@ def is_valid_company_name(name: Optional[str]) -> bool:
         r'\b(need|want|looking|book|booking|reserve|reservation)\b',
         r'\b(i am|we are|i need|we need|i want|we want|and also|can you|could you|please)\b',
         r'^(and|also|so|then|or|but|if|because|from|with|to|in|at)\b',
-        r'\b(how many|what is|where is|when is)\b'
+        r'\b(how many|what is|where is|when is)\b',
+        r'^\d+$'
     ]
     for pat in invalid_patterns:
         if re.search(pat, lower):
@@ -401,8 +405,9 @@ def extract_person_name(text: str) -> Optional[str]:
 def clean_company_name(text: str) -> str:
     """
     Clean company name from conversational prefixes and suffixes in English, Hindi, and Spanish.
+    Handles typos of company like 'comapny is', 'cmpany is', 'copmany is', etc.
     E.g.
-    'मेरी कंपनी का नाम और राक्षस है' -> 'और राक्षस'
+    'comapny is oraxiz' -> 'Oraxiz'
     'our company is Acme Corp' -> 'Acme Corp'
     """
     if not text:
@@ -412,17 +417,36 @@ def clean_company_name(text: str) -> str:
     # Strip any injected tags like (company), (individual), (restart)
     text = re.sub(r'\s*\([^\)]*\)\s*', ' ', text).strip()
 
-    # English prefixes
-    text = re.sub(r'^(?:it\s*\'?s|it\s+is|it\s+s\b|its\b|we\s+are|company\s+is|our\s+company\s+is|company\s+name\s+is|our\s+company\s+name\s+is|name\s+is|for)\s+', '', text, flags=re.I).strip()
+    # Flexible typo-tolerant company keyword pattern
+    comp_typo_pat = r'(?:comapn[ye]|compan[ye]|copman[ye]|compna[ye]|cmpan[ye]|compn[ye]|copan[ye]|companie|firm|org(?:anization)?|corp(?:oration)?|business)'
+
+    # English prefixes with company typo support
+    text = re.sub(
+        rf'^(?:(?:it\s*\'?s|it\s+is|it\s+s\b|its\b|we\s+are|i\s+am|i\'m\s+with|i\s+work\s+(?:at|for))\s+)?'
+        rf'(?:(?:the|our|my|for|booking\s+for|working\s+(?:at|for)|on\s+behalf\s+of|from)\s+)?'
+        rf'{comp_typo_pat}(?:\'?s)?'
+        rf'(?:'
+        rf'\s*(?:,|:|-)?\s*'
+        rf'(?:(?:its|the|our|my|whose)?\s*name(?:\s+is|\s*[:=-])?|(?:which|that)\s+is|named|called|is|as|namely)?'
+        rf'\s*[:=-]?\s*'
+        rf')',
+        '', text, flags=re.I
+    ).strip()
+
+    # Common conversational leading prefixes
+    text = re.sub(
+        r'^(?:(?:it\s*\'?s|it\s+is|it\s+s\b|its\b|we\s+are|name\s+is|for|booking\s+for|working\s+for|on\s+behalf\s+of)\s+)+',
+        '', text, flags=re.I
+    ).strip()
     if re.match(r'^it\s*s\w+', text, flags=re.I):
         text = re.sub(r'^it\s*s?', '', text, flags=re.I).strip()
 
     # Hindi prefixes: मेरी कंपनी का नाम, हमारी कंपनी का नाम, कंपनी का नाम, कंपनी नाम, मेरी कंपनी, कंपनी है
     text = re.sub(r'^(?:मेरी\s+कंपनी\s+का\s+नाम|हमारी\s+कंपनी\s+का\s+नाम|कंपनी\s+का\s+नाम|कंपनी\s+नाम|मेरी\s+कंपनी|कंपनी\s+है)\s*(?:है\s*)?', '', text, flags=re.I).strip()
-    text = re.sub(r'^(?:meri\s+company\s+ka\s+naam|company\s+ka\s+naam|meri\s+company|company\s+name\s+is)\s*', '', text, flags=re.I).strip()
+    text = re.sub(r'^(?:meri\s+company\s+(?:ka\s+)?naam|company\s+ka\s+naam|meri\s+company|company\s+name\s+is|company\s+hai)\s*', '', text, flags=re.I).strip()
 
     # Spanish prefixes: mi empresa se llama, el nombre de mi empresa es, la empresa es
-    text = re.sub(r'^(?:el\s+nombre\s+de\s+(?:mi\s+)?empresa\s+es|mi\s+empresa\s+se\s+llama|la\s+empresa\s+es|nuestra\s+empresa\s+es|empresa\s+es)\s*', '', text, flags=re.I).strip()
+    text = re.sub(r'^(?:el\s+nombre\s+de\s+(?:mi\s+)?empresa\s+es|mi\s+empresa\s+se\s+llama|la\s+empresa\s+es|nuestra\s+empresa\s+es|empresa\s+es|para\s+la\s+empresa)\s*', '', text, flags=re.I).strip()
 
     # Suffixes in Hindi and Spanish: 'है', 'hai'
     text = re.sub(r'\s+(?:है|hai)$', '', text, flags=re.I).strip()
@@ -434,6 +458,125 @@ def clean_company_name(text: str) -> str:
     if re.search(r'[a-zA-Z]', text):
         return text.title()
     return text
+
+def extract_company_name(text: str, current_step: Optional[str] = None) -> Optional[str]:
+    """
+    Extract a valid company or organization name from user input across English, Hindi, and Spanish.
+    Handles typos of 'company' (comapny, cmpany, copmany, compnay) and patterns like:
+    'comapny is oraxiz', 'company name is Acme', 'booking for company Oraxiz', 'for company its name is oraxiz',
+    'Oraxiz Corp'.
+    Returns None if no realistic company name is found.
+    """
+    if not text:
+        return None
+    raw = re.sub(r'\(.*?\)', '', text).strip()
+    if not raw:
+        return None
+
+    # Typo pattern for company keyword
+    comp_typo_pat = r'(?:comapn[ye]|compan[ye]|copman[ye]|compna[ye]|cmpan[ye]|compn[ye]|copan[ye]|companie|firm|org(?:anization)?|corp(?:oration)?|business)'
+
+    # Stop pattern to safely truncate company candidate before trailing sentence clauses or attributes
+    stop_pat = (
+        r'\b(?:and\s+also|and|also|with|for|we\s+need|i\s+need|we\s+want|i\s+want|need|want|'
+        r'cab|taxi|car|vehicle|pickup|pick-up|drop|drop-off|food|meals?|breakfast|dining|'
+        r'room|rooms|guest|guests|member|members|people|persons?|night|nights|days?|dates?|'
+        r'airport|flight|please|checking|check-in|checkin|checkout|check-out|today|tomorrow)\b|'
+        r'\b(?:\d+\s+(?:nights?|days?|rooms?|guests?|members?|people|persons?))\b|'
+        r'[,;\.!\?]'
+    )
+
+    # 1. Hindi Company Patterns
+    m_hi = re.search(
+        r'(?:मेरी\s+कंपनी\s+का\s+नाम|हमारी\s+कंपनी\s+का\s+नाम|कंपनी\s+का\s+नाम|कंपनी\s+नाम|कंपनी\s+है|हमारी\s+कंपनी|कंपनी)\s+([^\s,;।?!]+(?:\s+[^\s,;।?!]+){0,3}?)(?:\s+है|\s*[,;।?!]|\s+aur\b|\s+और\b|\s*$)',
+        raw, re.I
+    )
+    if m_hi:
+        raw_cand = m_hi.group(1)
+        truncated = re.split(stop_pat, raw_cand, flags=re.I)[0].strip()
+        cand = clean_company_name(truncated)
+        if is_valid_company_name(cand):
+            return cand
+
+    # Romanized Hindi ('meri company ka naam XYZ hai', 'company hai XYZ')
+    m_ro = re.search(
+        r'(?:meri\s+company\s+(?:ka\s+)?naam|company\s+naam|company\s+hai)\s+([a-zA-Z0-9]+(?:\s+[a-zA-Z0-9]+){0,3}?)(?:\s+hai|\s*[,;।?!]|\s*$)',
+        raw, re.I
+    )
+    if m_ro:
+        raw_cand = m_ro.group(1)
+        truncated = re.split(stop_pat, raw_cand, flags=re.I)[0].strip()
+        cand = clean_company_name(truncated)
+        if is_valid_company_name(cand):
+            return cand
+
+    # 2. Spanish Company Patterns
+    m_es = re.search(
+        r'(?:el\s+nombre\s+de\s+(?:mi\s+)?empresa\s+es|mi\s+empresa\s+se\s+llama|la\s+empresa\s+es|nuestra\s+empresa\s+es|empresa\s+es|para\s+la\s+empresa)\s+([a-zA-Z0-9\u00C0-\u017F]+(?:\s+[a-zA-Z0-9\u00C0-\u017F]+){0,3})',
+        raw, re.I
+    )
+    if m_es:
+        raw_cand = m_es.group(1)
+        truncated = re.split(stop_pat, raw_cand, flags=re.I)[0].strip()
+        cand = clean_company_name(truncated)
+        if is_valid_company_name(cand):
+            return cand
+
+    # 3. Flexible English Company Patterns:
+    # Handles: "for company its name is oraxiz", "company name is Acme", "comapny is oraxiz",
+    # "for company oraxiz", "booking for company Oraxiz", "company called Oraxiz", etc.
+    m_lead = re.search(
+        rf'\b(?:(?:the|our|my|for|booking\s+for|working\s+(?:at|for)|on\s+behalf\s+of|from)\s+)?'
+        rf'{comp_typo_pat}(?:\'?s)?'
+        rf'(?:'
+        rf'\s*(?:,|:|-)?\s*'
+        rf'(?:(?:its|the|our|my|whose)?\s*name(?:\s+is|\s*[:=-])?|(?:which|that)\s+is|named|called|is|as|namely)?'
+        rf'\s*[:=-]?\s*'
+        rf')'
+        rf'([A-Za-z0-9][^\s,;\.!\?]+(?:\s+[^\s,;\.!\?]+){{0,4}})',
+        raw, re.I
+    )
+    if m_lead:
+        raw_cand = m_lead.group(1)
+        truncated = re.split(stop_pat, raw_cand, flags=re.I)[0].strip()
+        cand = clean_company_name(truncated)
+        if is_valid_company_name(cand) and cand.lower() not in DISALLOWED_COMPANIES:
+            return cand
+
+    # 4. "booking for company X", "on behalf of X", "working at/for X"
+    m_for = re.search(
+        rf'\b(?:booking\s+for|on\s+behalf\s+of|working\s+(?:at|for)|from)\s+(?:(?:the|our|my)\s+)?(?:{comp_typo_pat}\s+)?([A-Za-z0-9][^\s,;\.!\?]+(?:\s+[^\s,;\.!\?]+){{0,4}})',
+        raw, re.I
+    )
+    if m_for:
+        raw_cand = m_for.group(1)
+        truncated = re.split(stop_pat, raw_cand, flags=re.I)[0].strip()
+        cand = clean_company_name(truncated)
+        if is_valid_company_name(cand) and cand.lower() not in DISALLOWED_COMPANIES:
+            return cand
+
+    # 5. Trailing business indicator: e.g. "Oraxiz Technologies", "Oraxiz Inc", "Oraxiz LLC", "Oraxiz Solutions"
+    m_trail = re.search(
+        rf'\b([A-Za-z0-9][A-Za-z0-9\s&\'\.-]{{1,30}})\s+(?:{comp_typo_pat}|technologies|tech|solutions|systems|group|holdings|enterprises|limited|ltd|llc|inc|pvt\s+ltd)\b',
+        raw, re.I
+    )
+    if m_trail:
+        raw_cand = m_trail.group(0)
+        truncated = re.split(stop_pat, raw_cand, flags=re.I)[0].strip()
+        cand = clean_company_name(truncated)
+        if is_valid_company_name(cand) and cand.lower() not in DISALLOWED_COMPANIES:
+            return cand
+
+    # 6. Direct company name ONLY when the current step is specifically asking for company name
+    if current_step == STEP_ASK_COMPANY_NAME:
+        cleaned = clean_company_name(raw)
+        if is_valid_company_name(cleaned):
+            if not check_location_match_with_fuzzy(cleaned)[0] and not check_hotel_match_with_fuzzy(cleaned)[0]:
+                if not re.search(r'\b(hotel|room|rooms|night|nights|guest|guests|individual|today|tomorrow)\b', cleaned.lower()):
+                    if cleaned.lower() not in DISALLOWED_NAMES and cleaned.lower() not in DISALLOWED_COMPANIES:
+                        return cleaned
+
+    return None
 
 def check_hotel_inquiry(text: str) -> Optional[str]:
     """Answer common hotel management & amenity questions only when user is genuinely inquiring."""
@@ -472,7 +615,7 @@ def check_hotel_inquiry(text: str) -> Optional[str]:
 def is_general_or_search_inquiry(text: str) -> bool:
     """
     Detect if user is asking a general knowledge question, requesting live web search,
-    asking for weather/attractions, or engaging in friendly chit-chat (greetings, jokes, identity).
+    asking for news/weather/attractions, or engaging in friendly chit-chat (greetings, jokes, identity).
     """
     if not text:
         return False
@@ -483,9 +626,15 @@ def is_general_or_search_inquiry(text: str) -> bool:
     if any(k in t for k in booking_actions):
         return False
 
+    # Strip leading conversational filler prefixes to inspect the underlying question/intent
+    clean_t = re.sub(
+        r'^(?:ok|okay|hey|hi|hello|so|well|please|pls|can you please tell me|can you tell me|can you please|can you|could you please|could you|tell me about|tell me)\s+',
+        '', t, flags=re.IGNORECASE
+    ).strip()
+
     # 1. Chit-chat & Greetings
     chitchat_exact = ["hi", "hello", "hey", "hola", "namaste", "नमस्ते", "good morning", "good evening", "good afternoon"]
-    if t in chitchat_exact or any(t.startswith(g + " ") for g in ["hi", "hello", "hey"]):
+    if t in chitchat_exact or clean_t in chitchat_exact or any(t.startswith(g + " ") for g in ["hi", "hello", "hey"]):
         return True
     if any(k in t for k in ["how are you", "how r u", "how are you doing", "how are things", "how's it going", "आप कैसे हैं", "कैसे हो", "como estas", "cómo estás"]):
         return True
@@ -498,6 +647,23 @@ def is_general_or_search_inquiry(text: str) -> bool:
 
     # 2. Weather & Forecast
     if any(k in t for k in ["weather", "temperature", "forecast", "is it raining", "is it cold", "rain today", "मौसम", "clima", "tiempo en"]):
+        return True
+
+    # 2.5 News, Headlines & Current Events
+    news_keywords = [
+        "news", "headline", "headlines", "current affairs", "breaking news", "what happened",
+        "whats happening", "what's happening", "ताज़ा ख़बर", "समाचार", "noticias", "noticia",
+        "latest updates", "today's update", "todays update", "today news", "todays news", "today's news"
+    ]
+    if any(k in t for k in news_keywords):
+        return True
+
+    # 2.6 Financial / Market / Sports Live Info
+    market_sports_kw = [
+        "stock price", "share price", "gold rate", "gold price", "silver price", "cricket score",
+        "match score", "who won", "election result", "score today", "sensex", "nifty"
+    ]
+    if any(k in t for k in market_sports_kw):
         return True
 
     # 3. Explicit Web Search Intent
@@ -513,7 +679,17 @@ def is_general_or_search_inquiry(text: str) -> bool:
         return True
 
     # 5. Open-ended questions asking for information or facts
-    if ("?" in t or any(t.startswith(q + " ") for q in ["what", "who", "where", "why", "how", "when", "tell me about"])) and not any(
+    question_starters = [
+        "what", "whats", "what's", "who", "whos", "who's", "whose", "whom",
+        "where", "wheres", "where's", "why", "how", "hows", "how's", "when", "whens", "when's",
+        "tell me about", "explain", "define", "meaning of"
+    ]
+    is_q = (
+        "?" in t or
+        any(t.startswith(q + " ") for q in question_starters) or
+        any(clean_t.startswith(q + " ") for q in question_starters)
+    )
+    if is_q and not any(
         b in t for b in ["room", "hotel", "rooms", "check-in", "checkin", "check-out", "checkout", "night", "nights", "vehicle", "cab"]
     ):
         return True
@@ -558,6 +734,26 @@ def perform_live_web_search(query: str) -> Optional[str]:
             if ans.get("snippet"):
                 return f"💡 {ans.get('snippet')}"
 
+        # 1.5 Google AI Overview (Rich synthesized answers)
+        ai_ov = data.get("ai_overview")
+        if ai_ov and isinstance(ai_ov, dict):
+            blocks = ai_ov.get("text_blocks", [])
+            lines = []
+            for b in blocks:
+                b_type = b.get("type")
+                snippet = b.get("snippet", "")
+                if b_type == "paragraph" and snippet and not any(snippet.startswith(ign) for ign in ["Watch live", "If you'd like", "Click here"]):
+                    lines.append(snippet)
+                elif b_type == "heading" and snippet:
+                    lines.append(f"\n**{snippet}**:")
+                elif b_type == "list":
+                    for li in b.get("list", []):
+                        li_snip = li.get("snippet", "")
+                        if li_snip and not any(li_snip.startswith(ign) for ign in ["Are you looking", "Do you want"]):
+                            lines.append(f"• {li_snip}")
+            if lines:
+                return "\n".join(lines).strip()
+
         # 2. Knowledge Graph (Landmarks, Places, People, Companies)
         kg = data.get("knowledge_graph")
         if kg:
@@ -569,6 +765,23 @@ def perform_live_web_search(query: str) -> Optional[str]:
                 if t_type:
                     header += f" *({t_type})*"
                 return f"{header}\n\n{desc}"
+
+        # 2.5 News / Top Stories
+        top_stories = data.get("top_stories") or data.get("news_results", [])
+        if top_stories:
+            lines = ["📰 **Top News Headlines**:"]
+            for item in top_stories[:4]:
+                t_title = item.get("title", "")
+                source = item.get("source", "")
+                date_str = item.get("date", "")
+                entry = f"• **{t_title}**"
+                if source:
+                    entry += f" (*{source}*)"
+                if date_str:
+                    entry += f" — {date_str}"
+                lines.append(entry)
+            if len(lines) > 1:
+                return "\n\n".join(lines)
 
         # 3. Organic Web Results
         organic = data.get("organic_results", [])
@@ -1044,6 +1257,8 @@ def check_hotel_match_with_fuzzy(text: str, location_id: Optional[str] = None, a
     stopwords = {
         "hotel", "azure", "grand", "palace", "resort", "suites", "suite", "tower", "inn", "the", "&", "and",
         "villa", "villas", "room", "rooms", "deluxe", "executive", "penthouse",
+        "want", "book", "booking", "need", "like", "looking", "find", "search", "reserve", "reservation",
+        "help", "can", "please", "wish", "for", "with", "would", "to", "a", "an", "in", "at", "from", "near",
         "cuarto", "cuartos", "habitación", "habitacion", "habitaciones", "कमरा", "कमरे", "रूम",
         "segundo", "segunda", "tercero", "tercera", "primero", "primera", "cuarto", "cuarta", "quinto", "quinta",
         "पहला", "दूसरा", "तीसरा", "चौथा", "पांचवां"
@@ -1433,26 +1648,38 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
                 else:
                     is_ascii = all(ord(c) < 128 for c in ord_phrase)
                     if is_ascii:
-                        if t == ord_phrase or re.search(rf"\b{re.escape(ord_phrase)}\b", t):
+                        if t == ord_phrase or (allow_bare_ordinals and re.search(rf"\b{re.escape(ord_phrase)}\b", t)):
                             return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
                     else:
                         if ord_phrase in t:
                             return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
 
         for alias in rdef['aliases']:
+            # Common English/Hindi words like 'family', 'team', 'luxury', 'single', 'double'
+            # should NOT match as a room type when hotel_id is unknown or in general conversation
+            if not hotel_id and alias in ["family", "team", "luxury", "suite", "double", "single", "standard", "solo", "exec", "परिवार", "शाही"]:
+                continue
             is_ascii = all(ord(c) < 128 for c in alias)
             if is_ascii:
-                if t == alias or re.search(rf"\b{re.escape(alias)}\b", t):
+                if t == alias or (allow_bare_ordinals and re.search(rf"\b{re.escape(alias)}\b", t)):
+                    return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
+                elif re.search(rf"\b(?:want|book|reserve|need)?\s*{re.escape(alias)}\s*(?:room|suite|villa|कमरा|सुइट|विला)\b", t):
                     return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
             else:
-                if alias in t:
+                if alias in t and (allow_bare_ordinals or any(k in t for k in ["कमरा", "सुइट", "विला", "room", "suite", "villa"])):
                     return (r_doc, "exact" if allow_bare_ordinals else "clarify", 1.0)
 
     # Step C: Fuzzy typo matching
+    # If no hotel is specified, NEVER do fuzzy typo matching across all generic room definitions
+    if not hotel_id:
+        return (None, "none", 0.0)
+
     room_stopwords = {
         "booking", "book", "booked", "confirm", "confirmation", "confirming", "yes", "no",
         "please", "want", "need", "like", "room", "rooms", "hotel", "hotels", "stay", "details",
-        "reserve", "reservation", "edit", "cancel", "thanks", "thank"
+        "reserve", "reservation", "edit", "cancel", "thanks", "thank",
+        "ok", "okay", "whats", "what", "is", "are", "today", "news", "in", "the", "about",
+        "tell", "me", "how", "why", "where", "when", "who", "which", "can", "you", "for", "a", "an"
     }
     filtered_words = [w for w in t_no_punct.split() if w not in room_stopwords and len(w) >= 3]
     best_room = None
@@ -1467,16 +1694,17 @@ def check_room_match_with_fuzzy(text: str, hotel_id: Optional[str] = None, allow
                 if s_full > best_score:
                     best_score = s_full
                     best_room = r_doc
-            for w in filtered_words:
-                s_w = fuzzy_sim(w, cand)
-                if s_w > best_score:
-                    best_score = s_w
-                    best_room = r_doc
+            # Token fuzzy matching is ONLY valid when input is a short phrase (e.g. typing room name)
+            if len(filtered_words) <= 2:
+                for w in filtered_words:
+                    if len(w) >= 4 and len(cand) >= 4:
+                        s_w = fuzzy_sim(w, cand)
+                        if s_w > best_score:
+                            best_score = s_w
+                            best_room = r_doc
 
-    if best_score >= 0.70 and best_room:
+    if best_score >= 0.75 and best_room:
         return (best_room, "clarify", best_score)
-
-    return (None, "none", 0.0)
 
     return (None, "none", 0.0)
 
@@ -1655,8 +1883,8 @@ def extract_nights_or_days(text: str) -> Optional[int]:
             return val
     
     # 1. Digits followed by nights/days in English, Hindi, or Spanish
-    # e.g. "2 days", "3 nights", "2 रातें", "2 रात", "3 दिन", "2 noches", "3 dias"
-    m = re.search(r'(\d+)\s*(?:nights?|days?|nts?|d|रातें|रात|दिन|noches?|d[ií]as?)', t)
+    # e.g. "2 days", "3 nights", "3 nitghs", "2 रातें", "2 रात", "3 दिन", "2 noches", "3 dias"
+    m = re.search(r'(\d+)\s*(?:nights?|nitghs?|nighs?|nigths?|nites?|nyts?|nghts?|days?|nts?|d|रातें|रात|दिन|noches?|d[ií]as?)', t)
     if m:
         n = int(m.group(1))
         if 1 <= n <= 60:
@@ -1666,7 +1894,7 @@ def extract_nights_or_days(text: str) -> Optional[int]:
     for word, val in NUMBER_WORDS.items():
         is_ascii = all(ord(c) < 128 for c in word)
         if is_ascii:
-            if re.search(rf'\b{word}\s*(?:nights?|days?|nts?|noches?|d[ií]as?)\b', t):
+            if re.search(rf'\b{word}\s*(?:nights?|nitghs?|nighs?|nigths?|nites?|nyts?|nghts?|days?|nts?|noches?|d[ií]as?)\b', t):
                 return val
         else:
             if re.search(rf'{re.escape(word)}\s*(?:रातें|रात|दिन|nights?|days?)', t):
@@ -1696,7 +1924,7 @@ def extract_nights_or_days(text: str) -> Optional[int]:
                 return val
 
     # 6. Fallback: if user mentions nights/days anywhere, grab any single/double digit
-    if any(k in t for k in ["night", "stay", "day", "रात", "दिन", "noche", "d[ií]a"]):
+    if any(k in t for k in ["night", "nitgh", "nigh", "nigth", "nite", "stay", "day", "रात", "दिन", "noche", "d[ií]a"]):
         dig = re.search(r'\b([1-9]|[1-5]\d|60)\b', t)
         if dig:
             return int(dig.group(1))
@@ -1761,8 +1989,12 @@ class BookingAgent:
             "checkout_date": None,
             "total_nights": None,
             "total_amount": None,
+            "food_included": None,
+            "food_preference": None,
+            "food_answered": False,
             "airport_pickup": False,
             "airport_drop": False,
+            "vehicle_answered": False,
             "contact_phone": None,
             "contact_email": None,
             "special_requests": None,
@@ -1795,8 +2027,12 @@ class BookingAgent:
             "checkout_date": None,
             "total_nights": None,
             "total_amount": None,
+            "food_included": None,
+            "food_preference": None,
+            "food_answered": False,
             "airport_pickup": False,
             "airport_drop": False,
+            "vehicle_answered": False,
             "contact_phone": None,
             "contact_email": None,
             "special_requests": None,
@@ -2176,11 +2412,34 @@ class BookingAgent:
         """
         Check if user is asking for hotel details (beds, balcony, smoking policy, complimentary food, google reviews, room types).
         CRITICAL:
-        - If user asks: first get which hotel. If no hotel is selected or known yet, prompt user which hotel.
-        - Once hotel is identified, fetch live web details / Google reviews and reply factually.
-        - If user does not ask: returns None ('or else no need to say').
+        - Only triggers when user is EXPLICITLY asking about a hotel, room, or hotel amenity.
+        - If user asks a general question or general web search without hotel context, returns None!
         """
         t = user_text.lower().strip()
+
+        # 0. Check for explicit hotel or room context in user's message
+        has_hotel_kw = any(k in t for k in [
+            "hotel", "hotels", "property", "properties", "resort", "resorts",
+            "room", "rooms", "suite", "suites", "accommodation", "lodging",
+            "google review", "google reviews", "guest review", "guest reviews", "hotel review", "hotel reviews"
+        ])
+        
+        # Check if a known hotel name is mentioned in user text
+        matched_hotel_name = False
+        cand_h, m_type, _ = check_hotel_match_with_fuzzy(user_text, location_id=session.get("location_id"))
+        if cand_h and m_type == "exact":
+            matched_hotel_name = True
+        if not matched_hotel_name:
+            cand_h, m_type, _ = check_hotel_match_with_fuzzy(user_text, location_id=None)
+            if cand_h and m_type == "exact":
+                matched_hotel_name = True
+
+        has_active_hotel = bool(session.get("hotel_id") or session.get("hotel_name"))
+
+        # If user did NOT mention a hotel keyword AND did NOT mention any known hotel name,
+        # and has no active hotel in session: this is NEVER a hotel details inquiry!
+        if not has_hotel_kw and not matched_hotel_name and not has_active_hotel:
+            return None
 
         # 1. Detect inquiry aspects
         bed_asked = bool(re.search(r'\b(bed|beds|bedding|king\s*size|queen\s*size|california\s*king|twin\s*bed|mattress|sleeping)\b', t) and
@@ -2199,11 +2458,11 @@ class BookingAgent:
         ) or (re.search(r'\b(room|rooms)\b', t) and re.search(r'\b(type|types|category|categories|options|available|details|list|show)\b', t)))
 
         details_asked = bool(
-            re.search(r'\b(?:hotel|property|room)?\s*(?:details|info|information|overview|features|amenities|reviews?|ratings?)\b', t) or
-            re.search(r'\b(?:give|tell|show|get|share|provide|need|want|have|what|how)\s+(?:me\s+)?(?:more\s+)?(?:the\s+)?(?:details|info|information|reviews?|overview|specs)\b', t) or
-            re.search(r'\b(?:details|info|information|reviews?)\s+(?:about|of|on|for)\b', t) or
-            re.search(r'\b(?:tell\s+me\s+about|what\s+about|how\s+is|know\s+about|explain\s+about|more\s+about|about\s+the|about\s+this)\b', t) or
-            re.search(r'\b(?:hotel details|property details|room details|tell me about|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?)\b', t)
+            re.search(r'\b(?:hotel|property|resort|room|suite)\s*(?:details|info|information|overview|features|amenities|reviews?|ratings?)\b', t) or
+            re.search(r'\b(?:details|info|information|reviews?|overview|specs)\s+(?:about|of|on|for)\s+(?:the\s+)?(?:hotel|property|resort|room|suite)\b', t) or
+            re.search(r'\b(?:tell\s+me\s+about|what\s+about|how\s+is|know\s+about)\s+(?:the\s+)?(?:hotel|property|resort|room|suite)\b', t) or
+            re.search(r'\b(?:hotel details|property details|room details|about the hotel|google reviews?|google rating|hotel reviews?|guest reviews?|ratings? and reviews?)\b', t) or
+            (matched_hotel_name and any(w in t for w in ["about", "details", "info", "review", "reviews", "how is", "what about", "tell me"]))
         )
 
         if not any([bed_asked, balcony_asked, smoking_asked, food_comp_asked, rooms_asked, details_asked]):
@@ -2495,7 +2754,7 @@ class BookingAgent:
         count_pats = [
             r'\b(?:change|modify|edit)\b.*\b(?:room\s*count|rooms\s*count|number\s*of\s*rooms?)\b',
             r'\b(?:room\s*count|rooms\s*count|number\s*of\s*rooms?)\b.*\b(?:change|modify|edit)\b',
-            r'\b(?:make\s+it|want|need|change\s+to)\s+(\d+)\s+rooms?\b'
+            r'\b(?:make\s+it|change\s+to|switch\s+to|modify\s+to|update\s+to)\s+(\d+)\s+rooms?\b'
         ]
         if any(re.search(p, t) for p in count_pats):
             return "rooms_count"
@@ -2505,7 +2764,7 @@ class BookingAgent:
             mem_pats = [
                 r'\b(?:change|modify|edit)\b.*\b(?:guest\s*count|guests\s*count|members?\s*count|number\s*of\s*guests?|pax|people)\b',
                 r'\b(?:guest\s*count|guests\s*count|members?\s*count|number\s*of\s*guests?|pax|people)\b.*\b(?:change|modify|edit)\b',
-                r'\b(?:make\s+it|want|need|change\s+to)\s+(\d+)\s+(?:guests?|members?|people)\b'
+                r'\b(?:make\s+it|change\s+to|switch\s+to|modify\s+to|update\s+to)\s+(\d+)\s+(?:guests?|members?|people)\b'
             ]
             if any(re.search(p, t) for p in mem_pats):
                 return "members_count"
@@ -2577,7 +2836,10 @@ class BookingAgent:
 
         # 6. Live Web Search for General Inquiries, Weather, Attractions, and Factual Questions
         if not ans:
-            search_query = re.sub(r'^(?:can you\s+)?(?:search for|search on google|search about|search|look up|google for me|google it|google|find online|find|tell me about)\s+', '', t, flags=re.I).strip(' ?')
+            search_query = re.sub(
+                r'^(?:ok|okay|hey|hi|hello|so|well|please|pls|can you please tell me|can you tell me|can you please|can you|could you please|could you|tell me about|tell me|search for|search on google|search about|search|look up|google for me|google it|google|find online|find|whats the|what is the|whats|what is|what are the|what are)\s+',
+                '', t, flags=re.I
+            ).strip(' ?')
             if not search_query:
                 search_query = t.strip(' ?')
 
@@ -2592,57 +2854,23 @@ class BookingAgent:
             else:
                 ans = f"I looked up information regarding **{search_query}**. Let me know if you need specific details or recommendations!"
 
-        # Bridge smoothly back to current booking step
+        # Answer the inquiry directly without forcing hotel booking or location cards
         curr_step = session.get("current_step", STEP_START)
-        quick_replies = []
-        options_data = None
-
-        if curr_step in [STEP_START, STEP_ASK_LOCATION]:
-            bridge = "\n\nWhenever you're ready, which **city or airport destination** would you like to search hotels for?"
-            quick_replies = self.get_location_quick_replies()
-            options_data = {"type": "locations", "items": db_manager.get_all_locations()}
-        elif curr_step == STEP_ASK_HOTEL:
-            city = session.get("location_city", "your destination")
-            bridge = f"\n\nWhenever you're ready, which hotel in **{city}** would you prefer to stay at?"
-            quick_replies = self.get_hotel_quick_replies(session.get("location_id"))
-            options_data = {"type": "hotels", "city": city, "items": db_manager.get_all_hotels(location_id=session.get("location_id"))}
-        elif curr_step == STEP_ASK_ROOM_TYPE:
-            bridge = f"\n\nWhich room category would you prefer for your stay at **{session.get('hotel_name', 'our hotel')}**?"
-            quick_replies = self.get_room_quick_replies(session.get("hotel_id"))
-            options_data = {"type": "rooms", "hotel_name": session.get("hotel_name"), "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))}
-        elif curr_step == STEP_ASK_ROOMS_COUNT:
-            bridge = f"\n\nHow many rooms would you like to reserve at **{session.get('hotel_name', 'our hotel')}**?"
-            quick_replies = ["1 Room", "2 Rooms", "3 Rooms", "4 Rooms"]
-        elif curr_step == STEP_ASK_MEMBERS_COUNT:
-            bridge = "\n\nHow many guests or members will be staying?"
-            quick_replies = ["1 Guest", "2 Guests", "3 Guests", "4 Guests"]
-        elif curr_step == STEP_ASK_CHECKIN_DATE:
-            bridge = "\n\nWhat date will you be checking in?"
-            quick_replies = ["Today", "Tomorrow", "Coming Thursday", "Next Friday"]
-        elif curr_step == STEP_ASK_CHECKOUT_DATE:
-            bridge = "\n\nHow many nights will you be staying (or what is your check-out date)?"
-            quick_replies = ["1 night", "2 nights", "3 nights", "5 nights"]
-        elif curr_step == STEP_ASK_FOOD:
-            bridge = "\n\nWould you like dining / meals included with your reservation?"
-            quick_replies = ["🍽️ Yes, Include Meals", "❌ Room Only (No Food)"]
-        elif curr_step == STEP_ASK_AIRPORT_VEHICLE:
-            bridge = "\n\nWould you like private airport chauffeur transportation?"
-            quick_replies = ["🚘 Both (Pick-up & Drop)", "🚗 Pick-up Only", "🚕 Drop-off Only", "❌ None / No"]
-        elif curr_step == STEP_ASK_TYPE_AND_NAME:
-            bridge = "\n\nAre you booking as an individual guest or on behalf of a company, and what is your name?"
-            quick_replies = ["Individual Guest", "Corporate / Company"]
+        has_active_booking = bool(session.get("hotel_id") or session.get("location_id"))
+        if has_active_booking:
+            quick_replies = ["🏨 Continue Hotel Booking", "🌤️ Check Today's Weather", "💬 Ask Another Question"]
         else:
-            bridge = "\n\nHow else may I assist you with your booking?"
+            quick_replies = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
 
-        reply = f"{ans}{bridge}"
+        reply = ans
         return {
             "session_id": session["session_id"],
             "reply": reply,
-            "current_step": session.get("current_step"),
+            "current_step": curr_step,
             "state": session,
             "quick_replies": quick_replies,
             "booking": None,
-            "options": options_data
+            "options": None
         }
 
     def extract_all_entities(self, text: str, session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -2653,6 +2881,8 @@ class BookingAgent:
         """
         if session is None:
             session = {}
+        if is_general_or_search_inquiry(text):
+            return {}
         extracted = {}
         t = text.lower().strip()
         if any(ord(c) > 127 for c in t):
@@ -2705,7 +2935,10 @@ class BookingAgent:
                     # Only search across other locations if location is completely unspecified
                     htl, h_type, h_score = check_hotel_match_with_fuzzy(text, location_id=None)
                 if htl:
-                    is_exact_or_allowed = (h_type == 'exact') if (session.get("hotel_id") and session.get("current_step") != STEP_ASK_HOTEL) else (h_type == 'exact' or h_score >= 0.75)
+                    if not loc_id:
+                        is_exact_or_allowed = (h_type == 'exact')
+                    else:
+                        is_exact_or_allowed = (h_type == 'exact') if (session.get("hotel_id") and session.get("current_step") != STEP_ASK_HOTEL) else (h_type == 'exact' or h_score >= 0.75)
                     if is_exact_or_allowed:
                         is_count = bool(re.search(r'\b\d+\s*(?:guests?|members?|rooms?|nights?|days?|people)\b', t))
                         if not (session.get("hotel_id") and is_count):
@@ -2722,8 +2955,14 @@ class BookingAgent:
             htl_id = htl['hotel_id'] if htl else session.get('hotel_id')
             is_room_step = (session.get('current_step') == STEP_ASK_ROOM_TYPE)
             rm, r_type, r_score = check_room_match_with_fuzzy(text, hotel_id=htl_id, allow_bare_ordinals=is_room_step)
-            if rm and (r_type == 'exact' or r_score >= 0.70):
-                extracted['room'] = rm
+            if rm:
+                if htl_id:
+                    if r_type == 'exact' or (is_room_step and r_score >= 0.75):
+                        extracted['room'] = rm
+                else:
+                    has_room_kw = any(k in t for k in ["room", "suite", "villa", "penthouse", "कमरा", "सुइट", "विला", "habitación"])
+                    if r_type == 'exact' and has_room_kw:
+                        extracted['room'] = rm
 
         # 4. Rooms Count
         rc_cnt = extract_room_count(text)
@@ -2772,6 +3011,12 @@ class BookingAgent:
             'both', 'pickup and drop', 'pick and drop', 'roundtrip', 'round-trip', 'pickup & drop', 'pick & drop',
             'दोनो', 'दोनों', 'दोनों तरफ', 'ida y vuelta', 'ambos'
         ]
+        drop_vehicle_kw = [
+            'drop only', 'drop off only', 'drop-off only', 'need drop', 'drop', 'drop-off', 'drop off',
+            'cab to drop', 'cab drop', 'taxi drop', 'drop to airport', 'drop at airport', 'airport drop',
+            'cab to airport', 'cab to the airport', 'taxi to airport', 'taxi to the airport', 'car to airport',
+            'drop off at airport', 'हवाई अड्डे तक ड्रॉप', 'ड्रॉप', 'traslado al aeropuerto', 'cab for drop'
+        ]
         pickup_vehicle_kw = [
             'pickup only', 'pick up only', 'need pickup', 'pick-up only', 'pickup', 'pick-up', 'pick up',
             'cab to pickup', 'cab pickup', 'taxi pickup', 'pickup from airport', 'pick up from airport',
@@ -2779,11 +3024,6 @@ class BookingAgent:
             'airport cab', 'airport taxi', 'cab from airport', 'taxi from airport', 'car from airport',
             'chauffeur pickup', 'airport transfer', 'हवाई अड्डे से पिकअप', 'पिकअप', 'गाड़ी चाहिए', 'recogida', 'recogida del aeropuerto',
             'cab for pickup', 'car for pickup', 'need cab', 'want cab', 'book cab', 'book a cab'
-        ]
-        drop_vehicle_kw = [
-            'drop only', 'drop off only', 'drop-off only', 'need drop', 'drop', 'drop-off', 'drop off',
-            'cab to drop', 'cab drop', 'taxi drop', 'drop to airport', 'drop at airport', 'airport drop',
-            'drop off at airport', 'हवाई अड्डे तक ड्रॉप', 'ड्रॉप', 'traslado al aeropuerto', 'cab for drop'
         ]
         no_vehicle_kw = [
             'no vehicle', 'no pickup', 'no transfer', 'no chauffeur', 'without vehicle', 'none', 'no cab', 'no taxi',
@@ -2799,13 +3039,13 @@ class BookingAgent:
             extracted['airport_pickup'] = True
             extracted['airport_drop'] = True
             extracted['vehicle_set'] = True
-        elif any(k in t for k in pickup_vehicle_kw):
-            extracted['airport_pickup'] = True
-            extracted['airport_drop'] = False
-            extracted['vehicle_set'] = True
         elif any(k in t for k in drop_vehicle_kw):
             extracted['airport_pickup'] = False
             extracted['airport_drop'] = True
+            extracted['vehicle_set'] = True
+        elif any(k in t for k in pickup_vehicle_kw):
+            extracted['airport_pickup'] = True
+            extracted['airport_drop'] = False
             extracted['vehicle_set'] = True
 
         # 7.1 Food Preference
@@ -2828,18 +3068,10 @@ class BookingAgent:
             extracted['food_answered'] = True
 
         # 8. Name / Company / Contact
-        comp_m = re.search(r'\b(?:company|firm|org|organization)[:\s]+([A-Za-z0-9\s&]{2,30})', t)
-        comp_hi = re.search(r'(?:मेरी\s+कंपनी\s+का\s+नाम|कंपनी\s+का\s+नाम|कंपनी\s+है|कंपनी)\s+([^\s,;।?!]+(?:\s+[^\s,;।?!]+){0,3}?)(?:\s+है|\s*[,;।?!]|\s*$)', text, re.I)
-        if comp_hi and not comp_m:
-            c_cand = clean_company_name(comp_hi.group(0))
-            if is_valid_company_name(c_cand):
-                extracted['company_name'] = c_cand
-                extracted['guest_type'] = 'company'
-        elif comp_m:
-            c_cand = clean_company_name(comp_m.group(1))
-            if is_valid_company_name(c_cand):
-                extracted['company_name'] = c_cand
-                extracted['guest_type'] = 'company'
+        cand_comp = extract_company_name(text, current_step=session.get("current_step") if session else None)
+        if cand_comp:
+            extracted['company_name'] = cand_comp
+            extracted['guest_type'] = 'company'
 
         cand_name = extract_person_name(text)
         has_explicit_name_pattern = bool(re.search(
@@ -2948,11 +3180,18 @@ class BookingAgent:
 
     def prompt_for_step(self, step: str, session: Dict[str, Any], extra_prefix: str = "") -> Tuple[str, List[str], Optional[Dict[str, Any]]]:
         """Generate response text, quick replies, and in-chat card options for any step."""
-        if step in [STEP_START, STEP_ASK_LOCATION]:
+        if step == STEP_START:
             reply = (
                 f"{extra_prefix}"
-                "Welcome to **Northstar Airline Assistance**! 🌟 I can help with a demo hotel booking, existing hotel booking support, or disruption-assistance questions.\n\n"
-                "**Which city or airport destination should I search for hotels near?**"
+                "Hello and welcome! 🌟 I'm your **Northstar AI Assistant**. How can I assist you today?"
+            )
+            return reply, ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"], None
+
+        elif step == STEP_ASK_LOCATION:
+            reply = (
+                f"{extra_prefix}"
+                "I would be delighted to assist you with booking a luxury 5-star hotel! 🌟\n\n"
+                "**Which city or airport destination would you like to search hotels near?**"
             )
             return reply, self.get_location_quick_replies(), {"type": "locations", "items": db_manager.get_all_locations()}
 
@@ -3120,13 +3359,12 @@ class BookingAgent:
         # ==============================================================
         # 0. GLOBAL RESTART
         # ==============================================================
-        if any(k in user_text.lower() for k in ["restart", "reset", "start over", "cancel booking", "new booking", "another booking"]):
+        if any(k in user_text.lower() for k in ["restart", "reset", "start over", "cancel booking", "new booking", "another booking", "new conversation"]):
             session = self.reset_session(session["session_id"])
             reply = (
-                "Welcome to **Northstar Airline Assistance**! 🌟\n\n"
-                "As you are arriving from the airport, **which city or airport destination are you traveling to?**"
+                "Hello and welcome! 🌟 I'm your **Northstar AI Assistant**. How can I assist you today?"
             )
-            quick_replies = self.get_location_quick_replies()
+            quick_replies = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
             session.setdefault("messages", []).append({
                 "role": "assistant",
                 "content": reply,
@@ -3136,14 +3374,11 @@ class BookingAgent:
             return {
                 "session_id": session["session_id"],
                 "reply": reply,
-                "current_step": STEP_ASK_LOCATION,
+                "current_step": STEP_START,
                 "state": session,
                 "quick_replies": quick_replies,
                 "booking": None,
-                "options": {
-                    "type": "locations",
-                    "items": db_manager.get_all_locations()
-                }
+                "options": None
             }
 
         # Check if session has an active booking or is completed
@@ -3191,7 +3426,196 @@ class BookingAgent:
             }
 
         # ==============================================================
-        # 1.5 GLOBAL CHANGE INTERCEPTOR (Change hotel, room, location, dates, vehicle, etc.)
+        # 1.5 MULTI-ATTRIBUTE & OUT-OF-ORDER INPUT PROCESSOR
+        # (Users providing room first, hotel first, dates first, or everything all-at-once)
+        # ==============================================================
+        extracted_entities = self.extract_all_entities(user_text, session)
+        is_multi_or_out_of_order = False
+
+        # If user input has 2 or more entities, it is ALWAYS a multi-attribute specification
+        if len(extracted_entities) >= 2:
+            is_multi_or_out_of_order = True
+        elif current_step in [STEP_START, STEP_ASK_LOCATION] and any(k in extracted_entities for k in ["location", "hotel", "rooms_count", "total_members", "total_nights", "vehicle_set", "food_answered"]):
+            is_multi_or_out_of_order = True
+        elif extracted_entities:
+            # Check if any extracted entity belongs to a DIFFERENT step than current_step
+            if "hotel" in extracted_entities and current_step != STEP_ASK_HOTEL:
+                is_multi_or_out_of_order = True
+            elif "room" in extracted_entities and current_step != STEP_ASK_ROOM_TYPE:
+                is_multi_or_out_of_order = True
+            elif ("checkin_date" in extracted_entities or "checkout_date" in extracted_entities) and current_step not in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
+                is_multi_or_out_of_order = True
+            elif "total_nights" in extracted_entities and current_step not in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
+                is_multi_or_out_of_order = True
+            elif "vehicle_set" in extracted_entities and current_step != STEP_ASK_AIRPORT_VEHICLE:
+                is_multi_or_out_of_order = True
+            elif "food_answered" in extracted_entities and current_step != STEP_ASK_FOOD:
+                is_multi_or_out_of_order = True
+            elif ("guest_name" in extracted_entities or "company_name" in extracted_entities) and current_step not in [STEP_ASK_TYPE_AND_NAME, STEP_ASK_COMPANY_NAME]:
+                is_multi_or_out_of_order = True
+
+        if is_multi_or_out_of_order:
+            # Apply extracted entities to session
+            if "location" in extracted_entities:
+                loc_doc = extracted_entities["location"]
+                session["location_id"] = loc_doc["location_id"]
+                session["location_city"] = loc_doc["city"]
+                session["airport_code"] = loc_doc["airport_code"]
+
+            if "hotel" in extracted_entities:
+                htl_doc = extracted_entities["hotel"]
+                session["hotel_id"] = htl_doc["hotel_id"]
+                session["hotel_name"] = htl_doc["name"]
+                session["hotel_address"] = htl_doc.get("address", "")
+                if htl_doc.get("location_id"):
+                    session["location_id"] = htl_doc["location_id"]
+
+            if "room" in extracted_entities:
+                rm_doc = extracted_entities["room"]
+                session["room_id"] = rm_doc["room_id"]
+                session["room_name"] = rm_doc["name"]
+                session["price_per_night"] = rm_doc.get("price_per_night", 100.0)
+
+            if "rooms_count" in extracted_entities:
+                session["rooms_count"] = max(1, extracted_entities["rooms_count"])
+
+            if "total_members" in extracted_entities:
+                session["total_members"] = max(1, extracted_entities["total_members"])
+
+            if "checkin_date" in extracted_entities:
+                session["checkin_date"] = extracted_entities["checkin_date"]
+
+            if "checkout_date" in extracted_entities:
+                session["checkout_date"] = extracted_entities["checkout_date"]
+
+            if "total_nights" in extracted_entities:
+                session["total_nights"] = extracted_entities["total_nights"]
+
+            # Harmonize checkin_date, checkout_date, and total_nights
+            if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
+                try:
+                    cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
+                    cout_dt = cin_dt + timedelta(days=int(session["total_nights"]))
+                    session["checkout_date"] = cout_dt.strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            elif session.get("checkin_date") and session.get("checkout_date"):
+                session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
+
+            if session.get("rooms_count") and session.get("price_per_night") and session.get("total_nights"):
+                session["total_amount"] = round(session["rooms_count"] * session["price_per_night"] * session["total_nights"], 2)
+
+            if "vehicle_set" in extracted_entities:
+                session["airport_pickup"] = extracted_entities.get("airport_pickup", False)
+                session["airport_drop"] = extracted_entities.get("airport_drop", False)
+                session["vehicle_answered"] = True
+
+            if "food_answered" in extracted_entities:
+                session["food_included"] = extracted_entities.get("food_included", True)
+                session["food_preference"] = extracted_entities.get("food_preference", "Yes, Food Included")
+                session["food_answered"] = True
+
+            if "guest_name" in extracted_entities:
+                session["guest_name"] = extracted_entities["guest_name"]
+                session["guest_type"] = extracted_entities.get("guest_type", "individual")
+
+            if "company_name" in extracted_entities:
+                session["company_name"] = extracted_entities["company_name"]
+                session["guest_type"] = "company"
+
+            if "contact_email" in extracted_entities:
+                session["contact_email"] = extracted_entities["contact_email"]
+
+            if "contact_phone" in extracted_entities:
+                session["contact_phone"] = extracted_entities["contact_phone"]
+
+            # Availability check if both room, dates, and rooms_count are set
+            if session.get("hotel_id") and session.get("room_id") and session.get("checkin_date") and session.get("checkout_date"):
+                is_avail, rem_count, msg = db_manager.check_room_availability_for_dates(
+                    hotel_id=session.get("hotel_id"),
+                    room_id=session.get("room_id"),
+                    checkin_date=session.get("checkin_date"),
+                    checkout_date=session.get("checkout_date"),
+                    requested_count=session.get("rooms_count", 1)
+                )
+                if not is_avail:
+                    session["current_step"] = STEP_ASK_ROOM_TYPE
+                    reply, quick_replies, options_data = self.prompt_for_step(
+                        STEP_ASK_ROOM_TYPE, session, extra_prefix=f"{msg}\n\n"
+                    )
+                    session.setdefault("messages", []).append({
+                        "role": "assistant",
+                        "content": reply,
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                    db_manager.save_session(session["session_id"], session)
+                    return {
+                        "session_id": session["session_id"],
+                        "reply": reply,
+                        "current_step": session.get("current_step"),
+                        "state": session,
+                        "quick_replies": quick_replies,
+                        "booking": None,
+                        "options": options_data
+                    }
+                else:
+                    session["total_amount"] = round(
+                        session.get("rooms_count", 1) * session.get("price_per_night", 100.0) * session.get("total_nights", 1), 2
+                    )
+
+            # Build concise acknowledgment prefix of what has been captured
+            ack_parts = []
+            if session.get("location_city"):
+                ack_parts.append(f"Destination: **{session['location_city']}**")
+            if session.get("hotel_name"):
+                ack_parts.append(f"Hotel: **{session['hotel_name']}**")
+            if session.get("room_name"):
+                rc = session.get('rooms_count', 1)
+                ack_parts.append(f"Room: **{rc} x {session['room_name']}**")
+            elif session.get("rooms_count"):
+                ack_parts.append(f"Rooms: **{session['rooms_count']}**")
+            if session.get("total_members"):
+                ack_parts.append(f"Guests: **{session['total_members']}**")
+            if session.get("company_name"):
+                ack_parts.append(f"Company: **{session['company_name']}**")
+            elif session.get("guest_name"):
+                ack_parts.append(f"Guest: **{session['guest_name']}**")
+            if session.get("checkin_date") and session.get("checkout_date"):
+                ack_parts.append(f"Stay: **{session['checkin_date']} to {session['checkout_date']}** ({session.get('total_nights', 1)} nights)")
+            elif session.get("total_nights"):
+                ack_parts.append(f"Duration: **{session['total_nights']} nights**")
+            if session.get("food_answered"):
+                f_str = "Included" if session.get("food_included") else "Room Only"
+                ack_parts.append(f"Food: **{f_str}**")
+            if session.get("vehicle_answered"):
+                v_str = "Pick-up & Drop" if (session.get("airport_pickup") and session.get("airport_drop")) else ("Pick-up" if session.get("airport_pickup") else ("Drop-off" if session.get("airport_drop") else "None"))
+                ack_parts.append(f"Vehicle: **{v_str}**")
+
+            ack_summary = "Understood! I've noted " + ", ".join(ack_parts) + ".\n\n" if ack_parts else ""
+
+            # Determine next missing step
+            next_step = self.determine_next_step(session)
+            session["current_step"] = next_step
+            reply, quick_replies, options_data = self.prompt_for_step(next_step, session, extra_prefix=ack_summary)
+
+            session.setdefault("messages", []).append({
+                "role": "assistant",
+                "content": reply,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+            db_manager.save_session(session["session_id"], session)
+            return {
+                "session_id": session["session_id"],
+                "reply": reply,
+                "current_step": session.get("current_step"),
+                "state": session,
+                "quick_replies": quick_replies,
+                "booking": None,
+                "options": options_data
+            }
+
+        # ==============================================================
+        # 1.55 GLOBAL CHANGE INTERCEPTOR (Change hotel, room, location, dates, vehicle, etc.)
         # ==============================================================
         change_target = self.detect_change_target(user_text)
         if change_target:
@@ -3435,192 +3859,6 @@ class BookingAgent:
                 })
                 db_manager.save_session(session["session_id"], session)
                 return search_res
-
-        # ==============================================================
-        # 1.6 MULTI-ATTRIBUTE & OUT-OF-ORDER INPUT PROCESSOR
-        # (Users providing room first, hotel first, dates first, or everything all-at-once)
-        # ==============================================================
-        extracted_entities = self.extract_all_entities(user_text, session)
-        is_multi_or_out_of_order = False
-
-        # If user input is a simple count or answer for the current step, do NOT treat as out of order
-        is_num = user_text.strip().isdigit() or user_text.lower().strip() in NUMBER_WORDS or extract_room_count(user_text) is not None
-        if is_num and current_step in [STEP_ASK_MEMBERS_COUNT, STEP_ASK_ROOMS_COUNT]:
-            is_multi_or_out_of_order = False
-        elif current_step in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE, STEP_ASK_FOOD, STEP_ASK_AIRPORT_VEHICLE, STEP_CONFIRMATION]:
-            is_multi_or_out_of_order = False
-        elif current_step == STEP_ASK_TYPE_AND_NAME and not any(k in extracted_entities for k in ["hotel", "room", "checkin_date", "checkout_date", "vehicle_set"]):
-            is_multi_or_out_of_order = False
-        elif len(extracted_entities) >= 2:
-            is_multi_or_out_of_order = True
-        elif extracted_entities:
-            # Check if any extracted entity belongs to a DIFFERENT step than current_step
-            if "hotel" in extracted_entities and current_step != STEP_ASK_HOTEL:
-                is_multi_or_out_of_order = True
-            elif "room" in extracted_entities and current_step != STEP_ASK_ROOM_TYPE:
-                is_multi_or_out_of_order = True
-            elif ("checkin_date" in extracted_entities or "checkout_date" in extracted_entities) and current_step not in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
-                is_multi_or_out_of_order = True
-            elif "total_nights" in extracted_entities and current_step not in [STEP_ASK_CHECKIN_DATE, STEP_ASK_CHECKOUT_DATE]:
-                is_multi_or_out_of_order = True
-            elif "vehicle_set" in extracted_entities and current_step != STEP_ASK_AIRPORT_VEHICLE:
-                is_multi_or_out_of_order = True
-            elif "food_answered" in extracted_entities and current_step != STEP_ASK_FOOD:
-                is_multi_or_out_of_order = True
-            elif ("guest_name" in extracted_entities or "company_name" in extracted_entities) and current_step not in [STEP_ASK_TYPE_AND_NAME, STEP_ASK_COMPANY_NAME]:
-                is_multi_or_out_of_order = True
-
-        if is_multi_or_out_of_order:
-            # Apply extracted entities to session
-            if "location" in extracted_entities:
-                loc_doc = extracted_entities["location"]
-                session["location_id"] = loc_doc["location_id"]
-                session["location_city"] = loc_doc["city"]
-                session["airport_code"] = loc_doc["airport_code"]
-
-            if "hotel" in extracted_entities:
-                htl_doc = extracted_entities["hotel"]
-                session["hotel_id"] = htl_doc["hotel_id"]
-                session["hotel_name"] = htl_doc["name"]
-                session["hotel_address"] = htl_doc.get("address", "")
-                if htl_doc.get("location_id"):
-                    session["location_id"] = htl_doc["location_id"]
-
-            if "room" in extracted_entities:
-                rm_doc = extracted_entities["room"]
-                session["room_id"] = rm_doc["room_id"]
-                session["room_name"] = rm_doc["name"]
-                session["price_per_night"] = rm_doc.get("price_per_night", 100.0)
-
-            if "rooms_count" in extracted_entities:
-                session["rooms_count"] = max(1, extracted_entities["rooms_count"])
-
-            if "total_members" in extracted_entities:
-                session["total_members"] = max(1, extracted_entities["total_members"])
-
-            if "checkin_date" in extracted_entities:
-                session["checkin_date"] = extracted_entities["checkin_date"]
-
-            if "checkout_date" in extracted_entities:
-                session["checkout_date"] = extracted_entities["checkout_date"]
-
-            if "total_nights" in extracted_entities:
-                session["total_nights"] = extracted_entities["total_nights"]
-
-            # Harmonize checkin_date, checkout_date, and total_nights
-            if session.get("checkin_date") and session.get("total_nights") and not session.get("checkout_date"):
-                try:
-                    cin_dt = datetime.strptime(session["checkin_date"], "%Y-%m-%d")
-                    cout_dt = cin_dt + timedelta(days=int(session["total_nights"]))
-                    session["checkout_date"] = cout_dt.strftime("%Y-%m-%d")
-                except Exception:
-                    pass
-            elif session.get("checkin_date") and session.get("checkout_date"):
-                session["total_nights"] = calculate_nights(session["checkin_date"], session["checkout_date"])
-
-            if session.get("rooms_count") and session.get("price_per_night") and session.get("total_nights"):
-                session["total_amount"] = round(session["rooms_count"] * session["price_per_night"] * session["total_nights"], 2)
-
-            if "vehicle_set" in extracted_entities:
-                session["airport_pickup"] = extracted_entities.get("airport_pickup", False)
-                session["airport_drop"] = extracted_entities.get("airport_drop", False)
-                session["vehicle_answered"] = True
-
-            if "food_answered" in extracted_entities:
-                session["food_included"] = extracted_entities.get("food_included", True)
-                session["food_preference"] = extracted_entities.get("food_preference", "Yes, Food Included")
-                session["food_answered"] = True
-
-            if "guest_name" in extracted_entities:
-                session["guest_name"] = extracted_entities["guest_name"]
-                session["guest_type"] = extracted_entities.get("guest_type", "individual")
-
-            if "company_name" in extracted_entities:
-                session["company_name"] = extracted_entities["company_name"]
-                session["guest_type"] = "company"
-
-            if "contact_email" in extracted_entities:
-                session["contact_email"] = extracted_entities["contact_email"]
-
-            if "contact_phone" in extracted_entities:
-                session["contact_phone"] = extracted_entities["contact_phone"]
-
-            # Availability check if both room, dates, and rooms_count are set
-            if session.get("hotel_id") and session.get("room_id") and session.get("checkin_date") and session.get("checkout_date"):
-                is_avail, rem_count, msg = db_manager.check_room_availability_for_dates(
-                    hotel_id=session.get("hotel_id"),
-                    room_id=session.get("room_id"),
-                    checkin_date=session.get("checkin_date"),
-                    checkout_date=session.get("checkout_date"),
-                    requested_count=session.get("rooms_count", 1)
-                )
-                if not is_avail:
-                    session["current_step"] = STEP_ASK_ROOM_TYPE
-                    reply, quick_replies, options_data = self.prompt_for_step(
-                        STEP_ASK_ROOM_TYPE, session, extra_prefix=f"{msg}\n\n"
-                    )
-                    session.setdefault("messages", []).append({
-                        "role": "assistant",
-                        "content": reply,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                    db_manager.save_session(session["session_id"], session)
-                    return {
-                        "session_id": session["session_id"],
-                        "reply": reply,
-                        "current_step": session.get("current_step"),
-                        "state": session,
-                        "quick_replies": quick_replies,
-                        "booking": None,
-                        "options": options_data
-                    }
-                else:
-                    session["total_amount"] = round(
-                        session.get("rooms_count", 1) * session.get("price_per_night", 100.0) * session.get("total_nights", 1), 2
-                    )
-
-            # Build concise acknowledgment prefix of what has been captured
-            ack_parts = []
-            if session.get("location_city"):
-                ack_parts.append(f"Destination: **{session['location_city']}**")
-            if session.get("hotel_name"):
-                ack_parts.append(f"Hotel: **{session['hotel_name']}**")
-            if session.get("room_name"):
-                rc = session.get('rooms_count', 1)
-                ack_parts.append(f"Room: **{rc} x {session['room_name']}**")
-            if session.get("checkin_date") and session.get("checkout_date"):
-                ack_parts.append(f"Stay: **{session['checkin_date']} to {session['checkout_date']}** ({session.get('total_nights', 1)} nights)")
-            elif session.get("total_nights"):
-                ack_parts.append(f"Duration: **{session['total_nights']} nights**")
-            if session.get("food_answered"):
-                f_str = "Included" if session.get("food_included") else "Room Only"
-                ack_parts.append(f"Food: **{f_str}**")
-            if session.get("vehicle_answered"):
-                v_str = "Pick-up & Drop" if (session.get("airport_pickup") and session.get("airport_drop")) else ("Pick-up" if session.get("airport_pickup") else ("Drop-off" if session.get("airport_drop") else "None"))
-                ack_parts.append(f"Vehicle: **{v_str}**")
-
-            ack_summary = "Understood! I've noted " + ", ".join(ack_parts) + ".\n\n" if ack_parts else ""
-
-            # Determine next missing step
-            next_step = self.determine_next_step(session)
-            session["current_step"] = next_step
-            reply, quick_replies, options_data = self.prompt_for_step(next_step, session, extra_prefix=ack_summary)
-
-            session.setdefault("messages", []).append({
-                "role": "assistant",
-                "content": reply,
-                "timestamp": datetime.utcnow().isoformat()
-            })
-            db_manager.save_session(session["session_id"], session)
-            return {
-                "session_id": session["session_id"],
-                "reply": reply,
-                "current_step": session.get("current_step"),
-                "state": session,
-                "quick_replies": quick_replies,
-                "booking": None,
-                "options": options_data
-            }
 
         # Check if user input is answering the current step (never intercept with generic FAQ)
         is_step_choice = False
@@ -3884,12 +4122,29 @@ class BookingAgent:
                     reply = f"Did you mean **{matched_loc['city']} ({matched_loc['airport_code']})**? (Is {matched_loc['city']} right?)"
                     quick_replies = [f"Yes, {matched_loc['city']}", "No, choose another"]
                 else:
-                    session["current_step"] = STEP_ASK_LOCATION
-                    reply = (
-                        "Welcome to **Northstar Airline Assistance**! 🌟 I can help with a demo hotel booking, existing hotel booking support, or disruption-assistance questions.\n\n"
-                        "Which city or airport destination should I search for hotels near?"
-                    )
-                    quick_replies = self.get_location_quick_replies()
+                    is_hotel_intent = any(k in lower for k in [
+                        "book", "reserve", "hotel", "hotels", "stay", "room", "rooms", "suite", "reservation",
+                        "होटल", "होटेल", "कमरा", "होटल बुक", "reservar", "habitacion", "alojamiento", "hospedaje"
+                    ])
+                    if is_hotel_intent:
+                        session["current_step"] = STEP_ASK_LOCATION
+                        reply = (
+                            "I would be delighted to assist you with booking a luxury 5-star hotel! 🌟\n\n"
+                            "**Which city or airport destination would you like to search hotels near?**"
+                        )
+                        quick_replies = self.get_location_quick_replies()
+                        options_data = {
+                            "type": "locations",
+                            "items": db_manager.get_all_locations()
+                        }
+                    else:
+                        search_res = perform_live_web_search(user_text)
+                        if search_res:
+                            reply = search_res
+                        else:
+                            reply = "Hello! 🌟 I'm your **Northstar AI Assistant**. I can help you search and book luxury hotels, check the weather, answer travel questions, and search the web. How may I assist you today?"
+                        quick_replies = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
+                        options_data = None
 
         # ==============================================================
         # STEP 2: ASK_HOTEL
@@ -3949,10 +4204,12 @@ class BookingAgent:
         # STEP 3: ASK_TYPE_AND_NAME
         # ==============================================================
         elif current_step == STEP_ASK_TYPE_AND_NAME:
+            extracted_comp = extract_company_name(user_text)
+            extracted_name = extract_person_name(user_text)
             lower = user_text.lower()
             words_tokens = [re.sub(r'[^a-z]', '', w) for w in lower.split()]
 
-            is_company = any(k in lower for k in ["company", "corporate", "business", "organization", "office", "team", "firm", "corp"])
+            is_company = bool(extracted_comp) or any(k in lower for k in ["company", "corporate", "business", "organization", "office", "team", "firm", "corp"])
             if not is_company:
                 for w in words_tokens:
                     if len(w) >= 4 and (
@@ -3977,9 +4234,10 @@ class BookingAgent:
             if has_role:
                 is_company = True
 
-            extracted_name = extract_person_name(user_text)
-
-            if is_company:
+            if extracted_comp:
+                session["company_name"] = extracted_comp
+                session["guest_type"] = "company"
+            elif is_company:
                 session["guest_type"] = "company"
             elif is_individual:
                 session["guest_type"] = "individual"
@@ -3993,7 +4251,17 @@ class BookingAgent:
             if session.get("guest_name") and not is_valid_person_name(session.get("guest_name")):
                 session["guest_name"] = None
 
-            if not session.get("guest_name") and not session.get("guest_type"):
+            if session.get("company_name"):
+                next_step = self.determine_next_step(session)
+                session["current_step"] = next_step
+                g_prefix = f" (Contact: {session['guest_name']})" if session.get("guest_name") else ""
+                reply, quick_replies, options_data = self.prompt_for_step(
+                    next_step,
+                    session,
+                    extra_prefix=f"Wonderful! We look forward to hosting **{session['company_name']}**{g_prefix}.\n\n"
+                )
+
+            elif not session.get("guest_name") and not session.get("guest_type"):
                 reply = "May I have your full name, and are you booking as an individual guest or on behalf of a company?"
                 quick_replies = ["👤 Individual Guest", "🏢 Company / Corporate Booking"]
 
@@ -4001,7 +4269,7 @@ class BookingAgent:
                 reply = f"A pleasure to meet you, {session['guest_name']}! Are you booking as an individual guest or on behalf of a company?"
                 quick_replies = ["👤 Individual Guest", "🏢 Company / Corporate Booking"]
 
-            elif session.get("guest_type") and not session.get("guest_name"):
+            elif session.get("guest_type") and not session.get("guest_name") and not session.get("company_name"):
                 if session["guest_type"] == "company":
                     session["current_step"] = STEP_ASK_COMPANY_NAME
                     reply = "Wonderful, we look forward to hosting your company! What is the name of your company or organization?"
@@ -4023,7 +4291,7 @@ class BookingAgent:
         # STEP 4: ASK_COMPANY_NAME
         # ==============================================================
         elif current_step == STEP_ASK_COMPANY_NAME:
-            comp_name = clean_company_name(user_text)
+            comp_name = extract_company_name(user_text) or clean_company_name(user_text)
 
             if not is_valid_company_name(comp_name):
                 # Check if user meant individual booking
@@ -4556,10 +4824,9 @@ class BookingAgent:
             elif any(k in lower for k in ["cancel"]):
                 session = self.reset_session(session["session_id"])
                 reply = (
-                    "Booking cancelled. Welcome back to **Northstar Airline Assistance**! 🌟\n\n"
-                    "Which city or airport destination would you like to search for hotels near?"
+                    "Booking cancelled. Hello and welcome! 🌟 I'm your **Northstar AI Assistant**. How can I assist you today?"
                 )
-                quick_replies = self.get_location_quick_replies()
+                quick_replies = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
                 session.setdefault("messages", []).append({
                     "role": "assistant",
                     "content": reply,
@@ -4569,14 +4836,11 @@ class BookingAgent:
                 return {
                     "session_id": session["session_id"],
                     "reply": reply,
-                    "current_step": STEP_ASK_LOCATION,
+                    "current_step": STEP_START,
                     "state": session,
                     "quick_replies": quick_replies,
                     "booking": None,
-                    "options": {
-                        "type": "locations",
-                        "items": db_manager.get_all_locations()
-                    }
+                    "options": None
                 }
             else:
                 reply = "Please let me know if you would like to proceed with the booking (Yes) or make any changes (Edit)."
@@ -4589,10 +4853,18 @@ class BookingAgent:
             if any(k in user_text.lower() for k in ["book another", "new booking", "book again", "restart", "start over"]):
                 session = self.reset_session(session["session_id"])
                 reply = (
-                    "Welcome to **Northstar Airline Assistance**! 🌟\n\n"
-                    "Which city or airport destination should I search for hotels near?"
+                    "Hello and welcome! 🌟 I'm your **Northstar AI Assistant**. How can I assist you today?"
                 )
-                quick_replies = self.get_location_quick_replies()
+                quick_replies = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
+                return {
+                    "session_id": session["session_id"],
+                    "reply": reply,
+                    "current_step": STEP_START,
+                    "state": session,
+                    "quick_replies": quick_replies,
+                    "booking": None,
+                    "options": None
+                }
             else:
                 found_booking = None
                 if session.get("booking_id"):
@@ -4677,7 +4949,9 @@ class BookingAgent:
                 "cancel_text": "No, choose another"
             }
         elif 'options_data' not in locals() or options_data is None:
-            if current_step_now in [STEP_START, STEP_ASK_LOCATION]:
+            if current_step_now == STEP_START:
+                options_data = None
+            elif current_step_now == STEP_ASK_LOCATION:
                 options_data = {
                     "type": "locations",
                     "items": db_manager.get_all_locations()

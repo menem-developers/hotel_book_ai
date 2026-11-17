@@ -191,7 +191,8 @@ def transcribe_audio_bytes(audio_bytes: bytes, file_ext: str = "webm", language:
 def clean_text_for_speech(text: str) -> str:
     """
     Clean markdown formatting, emojis, bullets, and URLs from assistant text
-    to produce clean, pleasant conversational speech.
+    to produce clean, pleasant, natural conversational speech.
+    Speaks the full informative content without cutting off at search headers or the first sentence.
     """
     if not text:
         return ""
@@ -205,22 +206,35 @@ def clean_text_for_speech(text: str) -> str:
     # 4. Remove emojis
     t = re.sub(r'[\U00010000-\U0010ffff]', '', t)
     t = re.sub(r'[\u2000-\u3300]', '', t)
-    # 5. Remove bullet points, numbers at start of lines, dashes
+
+    # 5. Remove search / news / boilerplate header lines if present
+    # (e.g. "Here is what I found on the web:", "Top News Headlines:", etc.)
+    t = re.sub(r'^\s*(?:here\s+is\s+what\s+i\s+found\s+(?:on\s+the\s+web)?|here\s+are\s+the\s+details|according\s+to\s+the\s+web|top\s+news\s+headlines|latest\s+updates?)\s*[:.]*\s*', '', t, flags=re.IGNORECASE | re.MULTILINE)
+
+    # 6. Remove bullet points, numbers at start of lines, dashes
     t = re.sub(r'^[ \t]*[•\-\*\+]\s*', '', t, flags=re.MULTILINE)
-    # 6. Normalize newlines to spaces or sentence separators
-    lines = [line.strip() for line in t.splitlines() if line.strip()]
+    # Replace pipes and ellipsis in headings with natural pause commas
+    t = re.sub(r'\s*\|\s*', ', ', t)
+    t = re.sub(r'\s*\.\.\.\s*', '. ', t)
+
+    # 7. Normalize newlines to spaces or sentence separators
+    # Filter out empty or leftover header lines
+    lines = [
+        line.strip().rstrip('.') for line in t.splitlines()
+        if line.strip() and not re.match(r'^(?:here\s+is\s+what\s+i\s+found|top\s+news\s+headlines|latest\s+updates?)\b', line.strip(), re.I)
+    ]
     cleaned = '. '.join(lines)
     cleaned = re.sub(r'\.+', '.', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
-    # 7. Truncate to concise natural conversational speech (first 2 sentences or ~220 chars)
-    # This ensures Edge TTS synthesizes in < 2 seconds and sounds snappy
-    if len(cleaned) > 220:
-        match = re.search(r'^(.*?[.?!])\s', cleaned[:220])
+    # 8. Limit length to a natural conversational spoken answer (up to ~650 chars / 3-4 sentences)
+    # Speaks multiple sentences so the user hears the actual answer, not just a cut-off fragment!
+    if len(cleaned) > 650:
+        match = re.search(r'^(.*?[.?!])\s+(?=[A-Z0-9\u0900-\u097F]|$)', cleaned[350:650])
         if match:
-            cleaned = match.group(1)
+            cleaned = cleaned[:350] + match.group(1)
         else:
-            cleaned = cleaned[:200].rstrip(' ,;:-') + '.'
+            cleaned = cleaned[:600].rstrip(' ,;:-') + '.'
 
     return cleaned
 
@@ -250,7 +264,7 @@ async def _synthesize_edge_tts_async(text: str, voice: str) -> bytes:
     import edge_tts
     communicate = edge_tts.Communicate(text=text, voice=voice)
     chunks = []
-    async with asyncio.timeout(4.0):
+    async with asyncio.timeout(10.0):
         async for chunk in communicate.stream():
             if chunk.get("type") == "audio":
                 chunks.append(chunk.get("data", b""))

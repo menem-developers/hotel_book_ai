@@ -19,7 +19,7 @@ const LANG_CONFIG = {
     placeholder: "Reply to the assistant (Type or click mic)...",
     tag: "Voice & Text",
     disclaimer: "AI responses can be inaccurate. Confirm bookings and policy with an authorized agent.",
-    greeting: "Welcome to **Northstar Airline Assistance**! 🌟 I can help with a demo hotel booking, existing hotel booking support, or disruption-assistance questions.\n\n**Which city or airport destination should I search for hotels near?**",
+    greeting: "Hello and welcome! 🌟 I'm your **Northstar AI Assistant**. How can I assist you today?",
     toast: "Language set to English (Neural Voice: Aria)"
   },
   hi: {
@@ -31,7 +31,7 @@ const LANG_CONFIG = {
     placeholder: "सहायक को उत्तर दें (टाइप करें या माइक दबाएं)...",
     tag: "वॉयस और टेक्स्ट",
     disclaimer: "एआई प्रतिक्रियाएं सांकेतिक हो सकती हैं। कृपया अपनी बुकिंग की पुष्टि करें।",
-    greeting: "**नॉर्थस्टार एयरलाइन सहायता** में आपका स्वागत है! 🌟 मैं होटल बुकिंग, मौजूदा आरक्षण पूछताछ और यात्रा सहायता में आपकी मदद कर सकता हूँ।\n\n**आप किस शहर या हवाई अड्डे के पास होटल खोजना चाहते हैं?**",
+    greeting: "नमस्ते और स्वागत है! 🌟 मैं आपकी **नॉर्थस्टार AI सहायक** हूँ। आज मैं आपकी क्या सहायता कर सकती हूँ?",
     toast: "भाषा हिन्दी सेट की गई (Swara Neural आवाज़ सक्रिय)"
   },
   es: {
@@ -43,7 +43,7 @@ const LANG_CONFIG = {
     placeholder: "Responda al asistente (Escriba o use el micrófono)...",
     tag: "Voz y Texto",
     disclaimer: "Las respuestas de IA pueden ser aproximadas. Confirme sus reservas con un agente autorizado.",
-    greeting: "¡Bienvenido a la **Asistencia de Northstar Airlines**! 🌟 Puedo ayudarle con reservas de hotel, consultas de reservas existentes y asistencia en viaje.\n\n**¿Cerca de qué ciudad o aeropuerto desea buscar hoteles?**",
+    greeting: "¡Hola y bienvenido! 🌟 Soy tu **asistente de Northstar AI**. ¿En qué puedo ayudarte hoy?",
     toast: "Idioma cambiado a Español (Voz Neural Elvira activa)"
   }
 };
@@ -138,13 +138,13 @@ async function selectLanguage(lang, triggerGreeting = true) {
   if (triggerGreeting) {
     showTyping(true);
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/chat/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: currentSessionId,
-          message: lang === "hi" ? "नमस्ते" : (lang === "es" ? "Hola" : "Hello"),
-          language: lang
+          language: lang,
+          tts_enabled: isNavbarSpeakEnabled()
         })
       });
       showTyping(false);
@@ -154,15 +154,15 @@ async function selectLanguage(lang, triggerGreeting = true) {
         localStorage.setItem("northstar_session_id", currentSessionId);
         lastState = data.state;
         chatMessages.innerHTML = "";
-        appendAssistantBubble(data.reply, data.options, data.quick_replies, data.booking, data.audio_base64);
+        appendAssistantBubble(data.reply, data.options, data.quick_replies, null, data.audio_base64);
       } else {
         chatMessages.innerHTML = "";
-        appendAssistantBubble(cfg.greeting);
+        appendAssistantBubble(cfg.greeting, null, ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]);
       }
     } catch (e) {
       showTyping(false);
       chatMessages.innerHTML = "";
-      appendAssistantBubble(cfg.greeting);
+      appendAssistantBubble(cfg.greeting, null, ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]);
     }
   }
 }
@@ -196,8 +196,64 @@ let audioChunks = [];
 let recordingTimerInterval = null;
 let recordingSeconds = 0;
 let isRecording = false;
-let ttsEnabled = true; // Auto-speech ON by default
+const savedTtsPref = localStorage.getItem("northstar_tts_enabled");
+let ttsEnabled = savedTtsPref !== null ? savedTtsPref === "true" : true; // Persist user voice speech preference
 let currentAudioPlayer = null;
+
+function isNavbarSpeakEnabled() {
+  const saved = localStorage.getItem("northstar_tts_enabled");
+  if (saved !== null) {
+    ttsEnabled = (saved === "true");
+  } else {
+    const btn = document.getElementById("btn-toggle-tts");
+    if (btn) {
+      if (btn.classList.contains("muted")) {
+        ttsEnabled = false;
+      } else if (btn.classList.contains("active-tts")) {
+        ttsEnabled = true;
+      }
+    }
+  }
+  return !!ttsEnabled;
+}
+window.isNavbarSpeakEnabled = isNavbarSpeakEnabled;
+
+function updateTtsButtonUI() {
+  const isEnabled = isNavbarSpeakEnabled();
+  const btn = document.getElementById("btn-toggle-tts");
+  if (btn) {
+    if (isEnabled) {
+      btn.classList.add("active-tts");
+      btn.classList.remove("muted");
+      btn.setAttribute("aria-pressed", "true");
+      btn.title = "Voice Audio Speech: ENABLED (Click to mute and switch to text-only)";
+      btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+    } else {
+      btn.classList.remove("active-tts");
+      btn.classList.add("muted");
+      btn.setAttribute("aria-pressed", "false");
+      btn.title = "Voice Audio Speech: MUTED / OFF (Click to enable AI voice)";
+      btn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
+    }
+  }
+
+  // Toggle body class for CSS suppression of audio buttons
+  if (typeof document !== "undefined" && document.body) {
+    document.body.classList.toggle("tts-muted", !isEnabled);
+  }
+
+  // Synchronize all message audio buttons across the chat canvas
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".btn-msg-audio").forEach(el => {
+      el.style.display = isEnabled ? "inline-flex" : "none";
+      if (!isEnabled) {
+        el.classList.remove("playing");
+        el.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+      }
+    });
+  }
+}
+window.updateTtsButtonUI = updateTtsButtonUI;
 let audioContext = null;
 let audioAnalyser = null;
 let audioVisualizerFrame = null;
@@ -271,6 +327,7 @@ const toastContainer = document.getElementById("toast-container");
 // Initialize immediately and also on DOMContentLoaded
 function setupAppListeners() {
   initVoiceFeatures();
+  updateTtsButtonUI();
 
   if (chatForm) chatForm.onsubmit = handleSendMessage;
   if (btnNewChat) btnNewChat.onclick = handleResetChat;
@@ -507,25 +564,25 @@ async function initializeChat() {
     const res = await fetch("/api/chat/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: currentSessionId, language: currentLanguage })
+      body: JSON.stringify({
+        session_id: currentSessionId,
+        language: currentLanguage,
+        tts_enabled: isNavbarSpeakEnabled()
+      })
     });
     const data = await res.json();
     currentSessionId = data.session_id;
     localStorage.setItem("northstar_session_id", currentSessionId);
     lastState = data.state;
 
-    // Clear canvas
+    // Clear canvas and render wish message only
     chatMessages.innerHTML = "";
-    if (data.reply && data.reply.trim().length > 0) {
-      appendAssistantBubble(data.reply, data.options, data.quick_replies);
-    } else {
-      // Prompt greeting in active language
-      selectLanguage(currentLanguage, true);
-    }
+    appendAssistantBubble(data.reply, data.options, data.quick_replies, null, data.audio_base64);
   } catch (err) {
     console.error("Init chat error:", err);
     chatMessages.innerHTML = "";
-    selectLanguage(currentLanguage, true);
+    const cfg = LANG_CONFIG[currentLanguage] || LANG_CONFIG.en;
+    appendAssistantBubble(cfg.greeting, null, ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]);
   }
 }
 
@@ -546,13 +603,15 @@ async function handleSendMessage(e) {
   showTyping(true);
 
   try {
+    const speakEnabled = isNavbarSpeakEnabled();
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: currentSessionId,
         message: text,
-        language: currentLanguage
+        language: currentLanguage,
+        tts_enabled: speakEnabled
       })
     });
 
@@ -583,24 +642,33 @@ async function handleSendMessage(e) {
 }
 
 async function handleResetChat() {
+  showTyping(true);
   try {
     const res = await fetch("/api/chat/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: currentSessionId, language: currentLanguage })
+      body: JSON.stringify({
+        session_id: currentSessionId,
+        language: currentLanguage,
+        tts_enabled: isNavbarSpeakEnabled()
+      })
     });
+    showTyping(false);
     const data = await res.json();
     currentSessionId = data.session_id;
     localStorage.setItem("northstar_session_id", currentSessionId);
     lastState = data.state;
 
+    // Clear canvas and render wish message only
     chatMessages.innerHTML = "";
-    selectLanguage(currentLanguage, true);
-    showToast(LANG_CONFIG[currentLanguage]?.toast || "Conversation reset.");
+    appendAssistantBubble(data.reply, data.options, data.quick_replies, null, data.audio_base64);
+    showToast("Started fresh conversation.");
   } catch (err) {
+    showTyping(false);
     console.error("Reset error:", err);
     chatMessages.innerHTML = "";
-    selectLanguage(currentLanguage, true);
+    const cfg = LANG_CONFIG[currentLanguage] || LANG_CONFIG.en;
+    appendAssistantBubble(cfg.greeting, null, ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]);
   }
 }
 
@@ -652,6 +720,7 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
   }
 
   const msgId = "msg-" + Math.random().toString(36).substring(2, 9);
+  const speakOn = isNavbarSpeakEnabled();
 
   row.innerHTML = `
     <div class="assistant-avatar">
@@ -661,7 +730,7 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
       <div class="assistant-header-line">
         <span class="assistant-name">Northstar Assistant</span>
         <span class="assistant-tag">AI</span>
-        <button type="button" class="btn-msg-audio" id="audio-btn-${msgId}" title="Listen to response (TTS)" onclick="handleMessageAudioClick(this, '${msgId}')">
+        <button type="button" class="btn-msg-audio" id="audio-btn-${msgId}" title="Listen to response (TTS)" onclick="handleMessageAudioClick(this, '${msgId}')" style="display: ${speakOn ? 'inline-flex' : 'none'};">
           <i class="fa-solid fa-volume-high"></i>
         </button>
       </div>
@@ -674,33 +743,39 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
     </div>
   `;
 
-  // Attach metadata for replay
+  // Attach metadata for replay ONLY if voice is enabled
   row.dataset.msgText = text || "";
-  if (audioBase64) {
+  if (speakOn && audioBase64) {
     row.dataset.audioBase64 = audioBase64;
   }
 
   chatMessages.appendChild(row);
   scrollToBottom();
 
-  // AT THE SAME TIME: Speak the response via Audio TTS if enabled
-  if (ttsEnabled && text && text.trim().length > 0) {
+  // AT THE SAME TIME: Speak the response via Audio TTS ONLY if navbar speak button is enabled
+  if (speakOn && text && text.trim().length > 0) {
     if (audioBase64) {
       playAudio(audioBase64);
     } else {
       // Stream server female neural audio first, fallback to strict female browser TTS
-      const cleanSnippet = text.replace(/[*_#`~]/g, '').trim().substring(0, 220);
+      const cleanSnippet = text.replace(/[*_#`~]/g, '').trim().substring(0, 600);
       const audioUrl = `/api/voice/tts?text=${encodeURIComponent(cleanSnippet)}&lang=${encodeURIComponent(currentLanguage || 'en')}`;
       const tempAudio = new Audio(audioUrl);
       tempAudio.oncanplaythrough = () => {
+        if (!isNavbarSpeakEnabled()) return;
         stopCurrentAudio();
         currentAudioPlayer = tempAudio;
-        tempAudio.play().catch(() => speakViaBrowserTTS(text));
+        tempAudio.play().catch(() => {
+          if (isNavbarSpeakEnabled()) speakViaBrowserTTS(text);
+        });
       };
       tempAudio.onerror = () => {
-        speakViaBrowserTTS(text);
+        if (isNavbarSpeakEnabled()) speakViaBrowserTTS(text);
       };
     }
+  } else {
+    // If navbar speak is muted/disabled, ensure any running audio is stopped immediately
+    stopCurrentAudio();
   }
 }
 
@@ -742,25 +817,15 @@ function toggleVoiceRecording() {
 window.toggleVoiceRecording = toggleVoiceRecording;
 
 function toggleTTS() {
-  ttsEnabled = !ttsEnabled;
-  const btn = document.getElementById("btn-toggle-tts");
+  const currentlyActive = isNavbarSpeakEnabled();
+  ttsEnabled = !currentlyActive;
+  localStorage.setItem("northstar_tts_enabled", ttsEnabled ? "true" : "false");
+  updateTtsButtonUI();
   if (ttsEnabled) {
-    if (btn) {
-      btn.classList.add("active-tts");
-      btn.classList.remove("muted");
-      btn.title = "Voice Audio Speech (TTS: ON)";
-      btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
-    }
     showToast("Voice Audio Speech enabled (ON)");
   } else {
-    if (btn) {
-      btn.classList.remove("active-tts");
-      btn.classList.add("muted");
-      btn.title = "Voice Audio Speech (TTS: MUTED)";
-      btn.innerHTML = '<i class="fa-solid fa-volume-xmark"></i>';
-    }
     stopCurrentAudio();
-    showToast("Voice Audio Speech muted (OFF)");
+    showToast("Voice Audio Speech muted (OFF) - Direct text mode");
   }
 }
 window.toggleTTS = toggleTTS;
@@ -1153,6 +1218,7 @@ async function processVoiceAudioBlob(blob) {
     const ext = blob.type.includes("mp4") ? "mp4" : "webm";
     formData.append("audio", blob, `voice_recording.${ext}`);
     formData.append("language", currentLanguage);
+    formData.append("tts_enabled", isNavbarSpeakEnabled() ? "true" : "false");
     if (liveTranscribedSpeech && liveTranscribedSpeech.trim().length > 1) {
       formData.append("client_transcript", liveTranscribedSpeech.trim());
     }
@@ -1203,6 +1269,11 @@ async function processVoiceAudioBlob(blob) {
 
 // Audio Playback Helpers
 function playAudio(audioDataUri, onEndCallback = null) {
+  if (!isNavbarSpeakEnabled()) {
+    stopCurrentAudio();
+    if (onEndCallback) onEndCallback();
+    return;
+  }
   stopCurrentAudio();
   try {
     currentAudioPlayer = new Audio(audioDataUri);
@@ -1309,6 +1380,10 @@ function getStrictFemaleVoice(targetLang) {
 
 function speakViaBrowserTTS(text) {
   if (!window.speechSynthesis) return;
+  if (!isNavbarSpeakEnabled()) {
+    stopCurrentAudio();
+    return;
+  }
   stopCurrentAudio();
   try {
     const clean = text
@@ -1339,6 +1414,17 @@ function speakViaBrowserTTS(text) {
 }
 
 window.handleMessageAudioClick = async function(btn, msgId) {
+  if (!isNavbarSpeakEnabled()) {
+    stopCurrentAudio();
+    if (btn) {
+      btn.style.display = "none";
+      btn.classList.remove("playing");
+      btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+    }
+    showToast("Voice speech is currently muted in top navbar. Click the speaker in the top bar to enable voice.");
+    return;
+  }
+
   const row = btn.closest(".assistant-message-row");
   if (!row) return;
 

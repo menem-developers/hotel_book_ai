@@ -177,68 +177,36 @@ async def get_languages():
 # ==============================================================
 @app.post("/api/chat/init")
 async def initialize_chat(request: ResetRequest):
-    """Start or retrieve chat session with language preference."""
-    session = booking_agent.get_or_create_session(request.session_id)
-    lang = (request.language or session.get("language") or "en").lower().strip()
+    """Start or reset chat session on page load/refresh with greeting wish message only."""
+    session_id = request.session_id
+    if session_id:
+        session = booking_agent.reset_session(session_id)
+    else:
+        session = booking_agent.get_or_create_session()
+
+    lang = (request.language or "en").lower().strip()
     session["language"] = lang
-    
-    # If session is fresh and has no messages, return localized greeting and options
-    if not session.get("messages"):
-        lang_info = language_service.get_language_info(lang)
-        welcome_text = lang_info["greeting"]
-        session["current_step"] = STEP_ASK_LOCATION
-        qr_list = booking_agent.get_location_quick_replies()
-        options = {"type": "locations", "items": db_manager.get_all_locations()}
-        resp = {
-            "session_id": session["session_id"],
-            "reply": welcome_text,
-            "current_step": STEP_ASK_LOCATION,
-            "state": session,
-            "quick_replies": qr_list,
-            "options": options,
-            "language": lang
-        }
-        localized = language_service.localize_response(resp, lang=lang)
+    session["current_step"] = STEP_START
+
+    lang_info = language_service.get_language_info(lang)
+    welcome_text = lang_info["greeting"]
+    qr_list = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
+    resp = {
+        "session_id": session["session_id"],
+        "reply": welcome_text,
+        "current_step": STEP_START,
+        "state": session,
+        "quick_replies": qr_list,
+        "options": None,
+        "language": lang
+    }
+    localized = language_service.localize_response(resp, lang=lang)
+    if getattr(request, "tts_enabled", True):
         try:
             localized["audio_base64"] = await voice_service.generate_tts_data_uri_async(localized.get("reply", ""), lang=lang)
         except Exception:
             localized["audio_base64"] = None
-        return localized
-
-    last_msg = session["messages"][-1]
-    welcome_text = last_msg.get("content", "")
-    current_st = session.get("current_step", STEP_START)
-    options = None
-    if current_st == STEP_ASK_LOCATION:
-        options = {"type": "locations", "items": db_manager.get_all_locations()}
-    elif current_st == "ASK_HOTEL":
-        options = {"type": "hotels", "items": db_manager.get_all_hotels(location_id=session.get("location_id"))}
-    elif current_st == "ASK_ROOM_TYPE":
-        options = {
-            "type": "rooms",
-            "hotel_name": session.get("hotel_name"),
-            "items": db_manager.get_all_rooms(hotel_id=session.get("hotel_id"))
-        }
-
-    qr_list = []
-    if current_st == STEP_ASK_LOCATION:
-        qr_list = booking_agent.get_location_quick_replies()
-    elif current_st == "ASK_ROOM_TYPE":
-        qr_list = booking_agent.get_room_quick_replies(session.get("hotel_id"))
-
-    resp = {
-        "session_id": session["session_id"],
-        "reply": welcome_text,
-        "current_step": current_st,
-        "state": session,
-        "quick_replies": qr_list,
-        "options": options,
-        "language": lang
-    }
-    localized = language_service.localize_response(resp, lang=lang)
-    try:
-        localized["audio_base64"] = await voice_service.generate_tts_data_uri_async(localized.get("reply", ""), lang=lang)
-    except Exception:
+    else:
         localized["audio_base64"] = None
     return localized
 
@@ -260,12 +228,15 @@ async def chat_message(req: ChatRequest):
     # Localize reply, card options, and quick replies into requested language
     result = language_service.localize_response(result, lang=lang)
 
-    # Generate TTS audio in the target language neural voice
-    try:
-        reply_text = result.get("reply", "")
-        result["audio_base64"] = await voice_service.generate_tts_data_uri_async(reply_text, lang=lang)
-    except Exception as e:
-        logger.warning(f"Failed to generate TTS audio in /api/chat: {e}")
+    # Generate TTS audio in the target language neural voice ONLY if TTS is enabled
+    if req.tts_enabled:
+        try:
+            reply_text = result.get("reply", "")
+            result["audio_base64"] = await voice_service.generate_tts_data_uri_async(reply_text, lang=lang)
+        except Exception as e:
+            logger.warning(f"Failed to generate TTS audio in /api/chat: {e}")
+            result["audio_base64"] = None
+    else:
         result["audio_base64"] = None
 
     result["language"] = lang
@@ -303,7 +274,8 @@ async def voice_chat(
     audio: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
     language: Optional[str] = Form("en"),
-    client_transcript: Optional[str] = Form(None)
+    client_transcript: Optional[str] = Form(None),
+    tts_enabled: Optional[bool] = Form(True)
 ):
     """
     1. Transcribe voice input using high-accuracy Speech Recognition (Hindi Devanagari, Spanish, English)
@@ -360,9 +332,12 @@ async def voice_chat(
         # Localize reply and quick replies to the target language
         result = language_service.localize_response(result, lang=lang)
 
-        # Generate TTS audio for the reply text in selected language
+        # Generate TTS audio for the reply text in selected language ONLY if TTS is enabled
         reply_text = result.get("reply", "")
-        audio_base64 = await voice_service.generate_tts_data_uri_async(reply_text, lang=lang)
+        if tts_enabled:
+            audio_base64 = await voice_service.generate_tts_data_uri_async(reply_text, lang=lang)
+        else:
+            audio_base64 = None
 
         return VoiceChatResponse(
             success=True,
@@ -414,31 +389,39 @@ async def tts_endpoint_get(
 
 @app.post("/api/chat/reset")
 async def reset_chat(req: ResetRequest):
-    """Reset session and start fresh in the chosen language."""
+    """Reset session on 'New conversation' with greeting wish message only."""
     session_id = req.session_id
-    lang = (req.language or "en").lower().strip()
     if not session_id:
         session = booking_agent.get_or_create_session()
         session_id = session["session_id"]
     else:
         session = booking_agent.reset_session(session_id)
 
+    lang = (req.language or "en").lower().strip()
     session["language"] = lang
+    session["current_step"] = STEP_START
+
     lang_info = language_service.get_language_info(lang)
     welcome_text = lang_info["greeting"]
-    session["current_step"] = STEP_ASK_LOCATION
-    qr_list = booking_agent.get_location_quick_replies()
-    options = {"type": "locations", "items": db_manager.get_all_locations()}
+    qr_list = ["🏨 Book a Hotel", "🌤️ Check Today's Weather", "✨ How can you assist me?"]
     resp = {
         "session_id": session_id,
         "reply": welcome_text,
-        "current_step": STEP_ASK_LOCATION,
+        "current_step": STEP_START,
         "state": session,
         "quick_replies": qr_list,
-        "options": options,
+        "options": None,
         "language": lang
     }
-    return language_service.localize_response(resp, lang=lang)
+    localized = language_service.localize_response(resp, lang=lang)
+    if getattr(req, "tts_enabled", True):
+        try:
+            localized["audio_base64"] = await voice_service.generate_tts_data_uri_async(localized.get("reply", ""), lang=lang)
+        except Exception:
+            localized["audio_base64"] = None
+    else:
+        localized["audio_base64"] = None
+    return localized
 
 # ==============================================================
 # BOOKINGS ENDPOINTS

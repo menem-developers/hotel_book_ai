@@ -25,9 +25,7 @@ SUPPORTED_LANGUAGES = {
         "whisper_prompt": "Hotel booking reservation, rooms, guests, dates, check-in, check-out, Mumbai, Delhi, Bangalore, Goa, New York.",
         "browser_lang": "en-US",
         "greeting": (
-            "Welcome to **Northstar Airline Assistance**! 🌟 I can help with a demo hotel booking, "
-            "existing hotel booking support, or disruption-assistance questions.\n\n"
-            "**Which city or airport destination should I search for hotels near?**"
+            "Hello and welcome! 🌟 I'm your **Northstar AI Assistant**. How can I assist you today?"
         ),
         "placeholder": "Reply to the assistant (Type or click mic)...",
         "channel_tag": "Voice & Text",
@@ -43,13 +41,12 @@ SUPPORTED_LANGUAGES = {
         "whisper_prompt": "होटल बुकिंग आरक्षण, कमरे, अतिथि, तारीखें, चेक-इन, चेक-आउट, मुंबई, दिल्ली, बेंगलुरु, गोवा।",
         "browser_lang": "hi-IN",
         "greeting": (
-            "**नॉर्थस्टार एयरलाइन सहायता** में आपका स्वागत है! 🌟 मैं होटल बुकिंग, "
-            "मौजूदा आरक्षण पूछताछ और यात्रा सहायता में आपकी मदद कर सकता हूँ।\n\n"
-            "**आप किस शहर या हवाई अड्डे के पास होटल खोजना चाहते हैं?**"
+            "नमस्ते और स्वागत है! 🌟 मैं आपकी **नॉर्थस्टार AI सहायक** हूँ। आज मैं आपकी क्या सहायता कर सकती हूँ?"
         ),
         "placeholder": "सहायक को उत्तर दें (टाइप करें या माइक दबाएं)...",
         "channel_tag": "वॉयस और टेक्स्ट",
-        "disclaimer": "एआई प्रतिक्रियाएं सांकेतिक हो सकती हैं। कृपया अपनी बुकिंग की पुष्टि करें।"
+        "disclaimer": "एआई प्रतिक्रियाएं सांकेतिक हो सकती हैं। कृपया अपनी बुकिंग की पुष्टि करें।",
+        "initial_quick_replies": ["🏨 होटल बुक करें", "🌤️ आज का मौसम क्या है?", "✨ आप क्या कर सकती हैं?"]
     },
     "es": {
         "code": "es",
@@ -61,9 +58,7 @@ SUPPORTED_LANGUAGES = {
         "whisper_prompt": "Reserva de hotel, habitaciones, huéspedes, fechas, check-in, check-out, Madrid, Barcelona, Mumbai, Delhi, Nueva York.",
         "browser_lang": "es-ES",
         "greeting": (
-            "¡Bienvenido a la **Asistencia de Northstar Airlines**! 🌟 Puedo ayudarle con reservas de hotel, "
-            "consultas de reservas existentes y asistencia en viaje.\n\n"
-            "**¿Cerca de qué ciudad o aeropuerto desea buscar hoteles?**"
+            "¡Hola y bienvenido! 🌟 Soy tu **asistente de Northstar AI**. ¿En qué puedo ayudarte hoy?"
         ),
         "placeholder": "Responda al asistente (Escriba o use el micrófono)...",
         "channel_tag": "Voz y Texto",
@@ -363,9 +358,7 @@ def preprocess_user_input(text: str, lang: str = "en") -> str:
 STEP_PROMPTS_LOCALIZED = {
     "hi": {
         "START": (
-            "**नॉर्थस्टार एयरलाइन सहायता** में आपका स्वागत है! 🌟 मैं होटल बुकिंग, "
-            "मौजूदा आरक्षण पूछताछ और उड़ान-सहायता में आपकी मदद कर सकता हूँ।\n\n"
-            "**आप किस शहर या हवाई अड्डे के पास होटल खोजना चाहते हैं?**"
+            "नमस्ते और स्वागत है! 🌟 मैं आपकी **नॉर्थस्टार AI सहायक** हूँ। आज मैं आपकी क्या सहायता कर सकती हूँ?"
         ),
         "ASK_LOCATION": (
             "**आप किस शहर या हवाई अड्डे के पास होटल खोजना चाहते हैं?**"
@@ -419,9 +412,7 @@ STEP_PROMPTS_LOCALIZED = {
     },
     "es": {
         "START": (
-            "¡Bienvenido a la **Asistencia de Northstar Airlines**! 🌟 Puedo ayudarle con reservas de hotel, "
-            "consultas de reservas existentes y asistencia en viaje.\n\n"
-            "**¿Cerca de qué ciudad o aeropuerto desea buscar hoteles?**"
+            "¡Hola y bienvenido! 🌟 Soy tu **asistente de Northstar AI**. ¿En qué puedo ayudarte hoy?"
         ),
         "ASK_LOCATION": (
             "**¿Cerca de qué ciudad o aeropuerto desea buscar hoteles?**"
@@ -477,6 +468,15 @@ STEP_PROMPTS_LOCALIZED = {
 
 QUICK_REPLIES_LOCALIZED = {
     "hi": {
+        "🏨 Book a Hotel": "🏨 होटल बुक करें",
+        "🌤️ What's the weather today?": "🌤️ आज का मौसम क्या है?",
+        "🌤️ Check Today's Weather": "🌤️ आज का मौसम क्या है?",
+        "✨ How can you assist me?": "✨ आप क्या कर सकती हैं?",
+        "✨ What can you do?": "✨ आप क्या कर सकती हैं?",
+        "🏨 Continue Hotel Booking": "🏨 होटल बुकिंग जारी रखें",
+        "🌤️ Check Weather": "🌤️ मौसम जांचें",
+        "🌤️ Check Weather Elsewhere": "🌤️ अन्य शहर का मौसम जांचें",
+        "💬 Ask Another Question": "💬 अन्य प्रश्न पूछें",
         "👤 Individual Guest": "👤 व्यक्तिगत अतिथि",
         "🏢 Company / Corporate Booking": "🏢 कंपनी / कॉर्पोरेट बुकिंग",
         "1 Guest": "1 अतिथि",
@@ -510,6 +510,15 @@ QUICK_REPLIES_LOCALIZED = {
         "🏨 Book Another Room": "🏨 दूसरा कमरा बुक करें"
     },
     "es": {
+        "🏨 Book a Hotel": "🏨 Reservar un hotel",
+        "🌤️ What's the weather today?": "🌤️ ¿Cómo está el clima hoy?",
+        "🌤️ Check Today's Weather": "🌤️ ¿Cómo está el clima hoy?",
+        "✨ How can you assist me?": "✨ ¿En qué puedes ayudarme?",
+        "✨ What can you do?": "✨ ¿Qué puedes hacer?",
+        "🏨 Continue Hotel Booking": "🏨 Continuar reserva",
+        "🌤️ Check Weather": "🌤️ Consultar clima",
+        "🌤️ Check Weather Elsewhere": "🌤️ Clima en otra ciudad",
+        "💬 Ask Another Question": "💬 Hacer otra pregunta",
         "👤 Individual Guest": "👤 Huésped Individual",
         "🏢 Company / Corporate Booking": "🏢 Reserva de Empresa / Corporativa",
         "1 Guest": "1 Huésped",

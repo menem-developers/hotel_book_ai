@@ -1707,21 +1707,43 @@ body {
   animation: pulseAudio 1s infinite alternate;
 }
 
+/* When voice speech is muted via navbar, strictly hide all message audio buttons */
+body.tts-muted .btn-msg-audio,
+.tts-muted .btn-msg-audio {
+  display: none !important;
+}
+
 @keyframes pulseAudio {
   from { transform: scale(1); opacity: 0.8; }
   to { transform: scale(1.15); opacity: 1; }
 }
 
-.active-tts {
+.active-tts,
+#btn-toggle-tts.active-tts {
   color: #0d9488 !important;
   background-color: #f0fdfa !important;
-  border-color: #99f6e4 !important;
+  border-color: #5eead4 !important;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15) !important;
+  transition: all 0.2s ease !important;
 }
 
-.active-tts.muted {
-  color: #94a3b8 !important;
-  background-color: #f8fafc !important;
-  border-color: #e2e8f0 !important;
+#btn-toggle-tts.active-tts:hover {
+  background-color: #ccfbf1 !important;
+  color: #0f766e !important;
+}
+
+.muted,
+#btn-toggle-tts.muted {
+  color: #ef4444 !important;
+  background-color: #fef2f2 !important;
+  border-color: #fca5a5 !important;
+  box-shadow: none !important;
+  transition: all 0.2s ease !important;
+}
+
+#btn-toggle-tts.muted:hover {
+  background-color: #fee2e2 !important;
+  color: #dc2626 !important;
 }
 
 /* ==========================================================================
