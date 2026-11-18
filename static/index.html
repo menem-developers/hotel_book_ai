@@ -320,12 +320,12 @@
       <!-- FLOATING CHAT INPUT CARD AT BOTTOM -->
       <div class="chat-input-wrapper">
         <div class="chat-input-card">
-          <!-- VOICE RECORDING OVERLAY (Shows when recording is active: waves, timer, restart & stop) -->
+          <!-- VOICE RECORDING OVERLAY (ChatGPT-style continuous hands-free voice mode) -->
           <div class="voice-recording-overlay" id="voice-recording-overlay" style="display: none;">
             <div class="voice-recording-left">
               <span class="voice-rec-badge" id="voice-rec-badge">
                 <span class="voice-pulse-dot" id="voice-pulse-dot"></span>
-                <span id="voice-rec-status-text">REC</span>
+                <span id="voice-rec-status-text">LISTENING</span>
               </span>
               <span class="voice-timer" id="voice-timer">0:00</span>
             </div>
@@ -352,24 +352,17 @@
               </div>
             </div>
 
-            <!-- Voice Controls: Restart, Cancel, Stop & Send -->
+            <!-- Hands-Free Voice Status and Exit Control (100% Autonomous Hands-Free) -->
             <div class="voice-recording-actions">
-              <!-- Restart Button -->
-              <button type="button" class="btn-voice-action btn-voice-restart" id="btn-voice-restart" onclick="restartVoiceRecording()" title="Restart recording from 0:00">
-                <i class="fa-solid fa-rotate-left"></i>
-                <span>Restart</span>
-              </button>
+              <div class="voice-handsfree-indicator" title="Autonomous Hands-Free Conversation">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <span>Hands-Free • Auto-sends on 3s pause</span>
+              </div>
 
-              <!-- Cancel Button -->
-              <button type="button" class="btn-voice-action btn-voice-cancel" id="btn-voice-cancel" onclick="cancelVoiceRecording()" title="Cancel recording">
-                <i class="fa-solid fa-xmark"></i>
-                <span>Cancel</span>
-              </button>
-
-              <!-- Stop & Send Button -->
-              <button type="button" class="btn-voice-action btn-voice-stop" id="btn-voice-stop" onclick="stopAndSendVoice()" title="Stop recording and send to AI">
-                <i class="fa-solid fa-stop"></i>
-                <span>Stop</span>
+              <!-- Exit Voice Mode Button (Return to text) -->
+              <button type="button" class="btn-voice-action btn-voice-cancel" id="btn-voice-cancel" onclick="stopContinuousVoiceMode()" title="Exit hands-free voice mode and return to text typing">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                <span>Exit Voice</span>
               </button>
             </div>
           </div>

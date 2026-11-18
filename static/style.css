@@ -1603,15 +1603,91 @@ body {
   box-shadow: 0 0 8px #f59e0b;
 }
 
+.voice-rec-badge.listening {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
+}
+
+.voice-rec-badge.listening .voice-pulse-dot {
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.voice-rec-badge.hearing {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #60a5fa;
+}
+
+.voice-rec-badge.hearing .voice-pulse-dot {
+  background-color: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+}
+
+.voice-rec-badge.countdown {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fbbf24;
+}
+
+.voice-rec-badge.countdown .voice-pulse-dot {
+  background-color: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
 .voice-rec-badge.processing {
-  background: rgba(14, 165, 233, 0.18);
-  border-color: rgba(14, 165, 233, 0.4);
-  color: #38bdf8;
+  background: rgba(139, 92, 246, 0.22);
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #a78bfa;
 }
 
 .voice-rec-badge.processing .voice-pulse-dot {
-  background-color: #0ea5e9;
-  box-shadow: 0 0 8px #0ea5e9;
+  background-color: #8b5cf6;
+  box-shadow: 0 0 8px #8b5cf6;
+}
+
+.voice-rec-badge.speaking {
+  background: rgba(13, 148, 136, 0.22);
+  border-color: rgba(13, 148, 136, 0.5);
+  color: #2dd4bf;
+}
+
+.voice-rec-badge.speaking .voice-pulse-dot {
+  background-color: #0d9488;
+  box-shadow: 0 0 8px #0d9488;
+}
+
+.voice-rec-badge.idle {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #94a3b8;
+}
+
+.voice-rec-badge.idle .voice-pulse-dot {
+  background-color: #94a3b8;
+  box-shadow: 0 0 6px #94a3b8;
+  animation: none;
+}
+
+.voice-handsfree-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13, 148, 136, 0.18);
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  color: #2dd4bf;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  user-select: none;
+}
+
+.voice-handsfree-indicator i {
+  color: #38bdf8;
+  font-size: 11px;
 }
 
 .v-bar:nth-child(2n) { animation-delay: 0.2s; }

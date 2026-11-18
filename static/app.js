@@ -200,6 +200,30 @@ const savedTtsPref = localStorage.getItem("northstar_tts_enabled");
 let ttsEnabled = savedTtsPref !== null ? savedTtsPref === "true" : true; // Persist user voice speech preference
 let currentAudioPlayer = null;
 
+// ==========================================================================
+// REAL-TIME AUDIO STATE MANAGEMENT SYSTEM
+// Required 4 Canonical States: IDLE, LISTENING, PROCESSING, SPEAKING
+// Workflow: LISTENING -> PROCESSING -> SPEAKING -> IDLE -> LISTENING
+// ==========================================================================
+const AUDIO_STATE = {
+  IDLE: "IDLE",
+  LISTENING: "LISTENING",
+  PROCESSING: "PROCESSING",
+  SPEAKING: "SPEAKING"
+};
+
+let currentAudioState = AUDIO_STATE.IDLE;
+const POST_TTS_DELAY_MS = 400; // Configurable post-playback delay (300-500ms)
+let postTtsDelayTimer = null;
+
+// ChatGPT-style Continuous Hands-Free Voice Conversation State
+let isContinuousVoiceMode = false;
+let voiceSilenceMasterInterval = null;
+let lastVoiceActivityTime = 0;
+let hasSpokenInTurn = false;
+let activeVoiceAbortController = null;
+let lastAssistantResponseText = "";
+
 function isNavbarSpeakEnabled() {
   const saved = localStorage.getItem("northstar_tts_enabled");
   if (saved !== null) {
@@ -258,41 +282,107 @@ let audioContext = null;
 let audioAnalyser = null;
 let audioVisualizerFrame = null;
 let maxAudioVolume = 0;
+let ambientNoiseBaseline = 0;
 
-// High-accuracy live in-browser speech recognition
+// High-accuracy live in-browser speech recognition (Human Voice Only)
 let browserSpeechRecognition = null;
 let liveTranscribedSpeech = "";
+let accumulatedFinalText = "";
 
 function startBrowserSpeechRecognition() {
+  if (!isContinuousVoiceMode) return;
   const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRec) return;
+  if (!SpeechRec) {
+    console.warn("SpeechRecognition API not supported in this browser. Fallback VAD will be used.");
+    return;
+  }
   try {
+    if (browserSpeechRecognition) {
+      browserSpeechRecognition.onend = null;
+      browserSpeechRecognition.onerror = null;
+      browserSpeechRecognition.onresult = null;
+      browserSpeechRecognition.onspeechstart = null;
+      browserSpeechRecognition.onspeechend = null;
+      try { browserSpeechRecognition.abort(); } catch (e) {}
+      browserSpeechRecognition = null;
+    }
     browserSpeechRecognition = new SpeechRec();
     browserSpeechRecognition.continuous = true;
     browserSpeechRecognition.interimResults = true;
     const localeMap = { "hi": "hi-IN", "es": "es-ES", "en": "en-US" };
     browserSpeechRecognition.lang = localeMap[currentLanguage] || "en-US";
     liveTranscribedSpeech = "";
+    accumulatedFinalText = "";
+
+    // Fired ONLY when acoustic model detects human speech (ignores fan noise & room sounds)
+    browserSpeechRecognition.onspeechstart = () => {
+      if (!isContinuousVoiceMode) return;
+      // CRITICAL: Block speaker audio feedback during PROCESSING, SPEAKING, and IDLE
+      if (currentAudioState !== AUDIO_STATE.LISTENING) {
+        console.log(`[Voice] Ignored speech start during ${currentAudioState} state.`);
+        return;
+      }
+      console.log("[Voice] Human speech onset detected by SpeechRecognition.");
+      handleBargeInInterruption();
+    };
+
+    // Fired when human speech stops
+    browserSpeechRecognition.onspeechend = () => {
+      if (!isContinuousVoiceMode) return;
+      if (currentAudioState !== AUDIO_STATE.LISTENING) return;
+      console.log("[Voice] Human speech ended detected by SpeechRecognition (3s pause countdown eligible).");
+      // Intentionally do NOT update lastVoiceActivityTime so the silence watcher counts 3s
+    };
 
     browserSpeechRecognition.onresult = (event) => {
-      let finalStr = "";
-      let interimStr = "";
-      for (let i = 0; i < event.results.length; ++i) {
+      if (!isContinuousVoiceMode && !isRecording) return;
+      // CRITICAL: Strictly ignore any speech recognition results unless actively in LISTENING state
+      if (currentAudioState !== AUDIO_STATE.LISTENING) {
+        console.log(`[Voice] Ignored speech recognition result during ${currentAudioState} state.`);
+        return;
+      }
+
+      let currentFinal = "";
+      let currentInterim = "";
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
         if (event.results[i].isFinal) {
-          finalStr += event.results[i][0].transcript + " ";
+          accumulatedFinalText += event.results[i][0].transcript + " ";
         } else {
-          interimStr += event.results[i][0].transcript;
+          currentInterim += event.results[i][0].transcript;
         }
       }
-      liveTranscribedSpeech = (finalStr + interimStr).trim();
-      const statusText = document.getElementById("voice-rec-status-text");
-      if (statusText && liveTranscribedSpeech) {
-        statusText.textContent = `REC: "${liveTranscribedSpeech.slice(-26)}"`;
+
+      const combined = (accumulatedFinalText + currentInterim).trim();
+
+      // Only true human speech creates non-empty transcripts (fan/ambient sound is ignored)
+      if (combined && combined.length > 0) {
+        liveTranscribedSpeech = combined;
+        lastVoiceActivityTime = Date.now();
+        hasSpokenInTurn = true;
+
+        // Barge-in: if AI was speaking, interrupt immediately!
+        handleBargeInInterruption();
+
+        setAudioState(AUDIO_STATE.LISTENING, combined);
       }
     };
 
     browserSpeechRecognition.onerror = (e) => {
-      console.warn("Browser SpeechRecognition notice:", e.error);
+      if (e.error !== "no-speech" && e.error !== "aborted") {
+        console.warn("Browser SpeechRecognition notice:", e.error);
+      }
+    };
+
+    // Auto-revive recognition if browser closes session during continuous hands-free mode
+    browserSpeechRecognition.onend = () => {
+      console.log("[Voice] SpeechRecognition onend fired. isContinuousVoiceMode =", isContinuousVoiceMode, "state =", currentAudioState);
+      if (isContinuousVoiceMode && currentAudioState === AUDIO_STATE.LISTENING) {
+        setTimeout(() => {
+          if (isContinuousVoiceMode && currentAudioState === AUDIO_STATE.LISTENING) {
+            ensureSpeechRecognitionActive();
+          }
+        }, 80);
+      }
     };
 
     browserSpeechRecognition.start();
@@ -303,12 +393,104 @@ function startBrowserSpeechRecognition() {
 
 function stopBrowserSpeechRecognition() {
   if (browserSpeechRecognition) {
+    browserSpeechRecognition.onend = null;
+    browserSpeechRecognition.onspeechstart = null;
+    browserSpeechRecognition.onspeechend = null;
+    browserSpeechRecognition.onresult = null;
     try {
-      browserSpeechRecognition.stop();
+      browserSpeechRecognition.abort();
     } catch (e) {}
     browserSpeechRecognition = null;
   }
 }
+
+function ensureSpeechRecognitionActive() {
+  if (!isContinuousVoiceMode || currentAudioState !== AUDIO_STATE.LISTENING) return;
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) return;
+
+  if (!browserSpeechRecognition) {
+    startBrowserSpeechRecognition();
+    return;
+  }
+
+  try {
+    browserSpeechRecognition.start();
+  } catch (err) {
+    // If it threw because recognition is already running, that's fine (InvalidStateError)
+    // Otherwise, recreate instance
+    if (err.name !== "InvalidStateError") {
+      startBrowserSpeechRecognition();
+    }
+  }
+}
+
+function ensureMediaRecorderActive() {
+  if (!isContinuousVoiceMode || !currentMediaStream || currentAudioState !== AUDIO_STATE.LISTENING) return;
+
+  if (!mediaRecorder || mediaRecorder.state === "inactive") {
+    console.log("[Voice] Re-activating MediaRecorder for next turn.");
+    initMediaRecorder(currentMediaStream);
+    try {
+      mediaRecorder.start(100);
+    } catch (e) {
+      try { mediaRecorder.start(); } catch (e2) {}
+    }
+  } else if (mediaRecorder.state === "paused") {
+    try {
+      mediaRecorder.resume();
+    } catch (e) {}
+  }
+}
+
+// --------------------------------------------------------------------------
+// Audio Lifecycle Transition: SPEAKING -> IDLE -> LISTENING
+// --------------------------------------------------------------------------
+function transitionAfterTTS() {
+  if (!isContinuousVoiceMode) {
+    setAudioState(AUDIO_STATE.IDLE);
+    return;
+  }
+
+  console.log(`[AudioLifecycle] Assistant playback complete. Entering IDLE state with ${POST_TTS_DELAY_MS}ms quiet window.`);
+
+  // 1. Workflow step: SPEAKING -> IDLE
+  setAudioState(AUDIO_STATE.IDLE);
+
+  // 2. Clear or discard buffered audio captured during TTS playback
+  audioChunks = [];
+  liveTranscribedSpeech = "";
+  accumulatedFinalText = "";
+  hasSpokenInTurn = false;
+  lastVoiceActivityTime = 0;
+
+  if (postTtsDelayTimer) {
+    clearTimeout(postTtsDelayTimer);
+  }
+
+  // 3. Post-playback quiet delay (default 400ms) for room reverb & speaker sound to dissipate
+  postTtsDelayTimer = setTimeout(() => {
+    postTtsDelayTimer = null;
+    if (!isContinuousVoiceMode) return;
+
+    // Reset audio buffers once more before resuming LISTENING
+    audioChunks = [];
+    liveTranscribedSpeech = "";
+    accumulatedFinalText = "";
+    hasSpokenInTurn = false;
+    lastVoiceActivityTime = 0;
+
+    // 4. Workflow step: IDLE -> LISTENING
+    setAudioState(AUDIO_STATE.LISTENING);
+
+    // 5. Resume microphone processing: start fresh speech recognition & ensure recorder is active
+    startBrowserSpeechRecognition();
+    ensureMediaRecorderActive();
+    console.log("[AudioLifecycle] Completed full cycle: SPEAKING -> IDLE -> LISTENING. Ready for next human speech.");
+  }, POST_TTS_DELAY_MS);
+}
+window.transitionAfterTTS = transitionAfterTTS;
+const handleAssistantVoiceFinished = transitionAfterTTS; // backwards-compatible alias
 
 // Sidebar Nav Elements
 const btnNewChat = document.getElementById("btn-new-chat");
@@ -692,7 +874,7 @@ function appendUserBubble(text, isVoice = false) {
   scrollToBottom();
 }
 
-function appendAssistantBubble(text, options = null, quickReplies = [], booking = null, audioBase64 = null) {
+function appendAssistantBubble(text, options = null, quickReplies = [], booking = null, audioBase64 = null, onVoiceCompleteCallback = null) {
   const row = document.createElement("div");
   row.className = "assistant-message-row";
 
@@ -745,6 +927,7 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
 
   // Attach metadata for replay ONLY if voice is enabled
   row.dataset.msgText = text || "";
+  lastAssistantResponseText = (text || "").toLowerCase();
   if (speakOn && audioBase64) {
     row.dataset.audioBase64 = audioBase64;
   }
@@ -754,33 +937,26 @@ function appendAssistantBubble(text, options = null, quickReplies = [], booking 
 
   // AT THE SAME TIME: Speak the response via Audio TTS ONLY if navbar speak button is enabled
   if (speakOn && text && text.trim().length > 0) {
-    if (audioBase64) {
-      playAudio(audioBase64);
-    } else {
-      // Stream server female neural audio first, fallback to strict female browser TTS
-      const cleanSnippet = text.replace(/[*_#`~]/g, '').trim().substring(0, 600);
-      const audioUrl = `/api/voice/tts?text=${encodeURIComponent(cleanSnippet)}&lang=${encodeURIComponent(currentLanguage || 'en')}`;
-      const tempAudio = new Audio(audioUrl);
-      tempAudio.oncanplaythrough = () => {
-        if (!isNavbarSpeakEnabled()) return;
-        stopCurrentAudio();
-        currentAudioPlayer = tempAudio;
-        tempAudio.play().catch(() => {
-          if (isNavbarSpeakEnabled()) speakViaBrowserTTS(text);
-        });
-      };
-      tempAudio.onerror = () => {
-        if (isNavbarSpeakEnabled()) speakViaBrowserTTS(text);
-      };
-    }
+    playTTSWithLifecycle(audioBase64, text, () => {
+      if (typeof onVoiceCompleteCallback === "function") {
+        onVoiceCompleteCallback();
+      } else if (isContinuousVoiceMode) {
+        transitionAfterTTS();
+      }
+    });
   } else {
     // If navbar speak is muted/disabled, ensure any running audio is stopped immediately
     stopCurrentAudio();
+    if (typeof onVoiceCompleteCallback === "function") {
+      setTimeout(onVoiceCompleteCallback, 200);
+    } else if (isContinuousVoiceMode) {
+      transitionAfterTTS();
+    }
   }
 }
 
 // ==========================================================================
-// VOICE RECORDING (WHISPER STT) & AUDIO SPEECH (TTS) FUNCTIONS
+// CHATGPT-STYLE CONTINUOUS HANDS-FREE VOICE CONVERSATION ENGINE
 // ==========================================================================
 
 function initVoiceFeatures() {
@@ -788,6 +964,7 @@ function initVoiceFeatures() {
   const btnRestart = document.getElementById("btn-voice-restart");
   const btnCancel = document.getElementById("btn-voice-cancel");
   const btnStop = document.getElementById("btn-voice-stop");
+  const btnSendNow = document.getElementById("btn-voice-send-now");
   const btnTts = document.getElementById("btn-toggle-tts");
 
   if (btnRec) {
@@ -797,10 +974,13 @@ function initVoiceFeatures() {
     btnRestart.onclick = restartVoiceRecording;
   }
   if (btnCancel) {
-    btnCancel.onclick = cancelVoiceRecording;
+    btnCancel.onclick = stopContinuousVoiceMode;
   }
   if (btnStop) {
-    btnStop.onclick = stopAndSendVoice;
+    btnStop.onclick = stopContinuousVoiceMode;
+  }
+  if (btnSendNow) {
+    btnSendNow.onclick = triggerImmediateSend;
   }
   if (btnTts) {
     btnTts.onclick = toggleTTS;
@@ -808,10 +988,10 @@ function initVoiceFeatures() {
 }
 
 function toggleVoiceRecording() {
-  if (isRecording) {
-    stopAndSendVoice();
+  if (isContinuousVoiceMode || isRecording) {
+    stopContinuousVoiceMode();
   } else {
-    startVoiceRecording();
+    startContinuousVoiceMode();
   }
 }
 window.toggleVoiceRecording = toggleVoiceRecording;
@@ -822,9 +1002,15 @@ function toggleTTS() {
   localStorage.setItem("northstar_tts_enabled", ttsEnabled ? "true" : "false");
   updateTtsButtonUI();
   if (ttsEnabled) {
-    showToast("Voice Audio Speech enabled (ON)");
+    showToast("Voice Mode enabled! Continuous hands-free conversation active (ChatGPT Style).");
+    if (!isContinuousVoiceMode) {
+      startContinuousVoiceMode();
+    }
   } else {
     stopCurrentAudio();
+    if (isContinuousVoiceMode) {
+      stopContinuousVoiceMode();
+    }
     showToast("Voice Audio Speech muted (OFF) - Direct text mode");
   }
 }
@@ -843,11 +1029,183 @@ function initMediaRecorder(stream) {
   mediaRecorder = new MediaRecorder(stream, options);
 
   mediaRecorder.ondataavailable = (e) => {
+    // CRITICAL: Strictly drop all incoming audio chunks unless actively in LISTENING state
+    if (currentAudioState !== AUDIO_STATE.LISTENING) {
+      return;
+    }
     if (e.data && e.data.size > 0) {
       audioChunks.push(e.data);
     }
   };
 }
+
+function handleBargeInInterruption() {
+  let wasInterrupted = false;
+
+  if (postTtsDelayTimer) {
+    clearTimeout(postTtsDelayTimer);
+    postTtsDelayTimer = null;
+  }
+
+  // 1. Immediately cut off playing assistant audio
+  if (currentAudioPlayer) {
+    stopCurrentAudio();
+    wasInterrupted = true;
+  }
+
+  // 2. Immediately cancel browser speech synthesis
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
+    window.speechSynthesis.cancel();
+    wasInterrupted = true;
+  }
+
+  // 3. Immediately abort any in-flight response request
+  if (activeVoiceAbortController) {
+    activeVoiceAbortController.abort();
+    activeVoiceAbortController = null;
+    showTyping(false);
+    wasInterrupted = true;
+  }
+
+  // 4. Reset playing button animations on messages
+  document.querySelectorAll(".btn-msg-audio.playing").forEach(b => {
+    b.classList.remove("playing");
+    b.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+  });
+
+  if (wasInterrupted) {
+    console.log("[Voice] Barge-in: interrupted assistant speech in real time.");
+  }
+}
+
+function setAudioState(state, previewText = "", countdownSecs = 3) {
+  currentAudioState = state;
+  console.log(`[AudioState] -> ${state}`);
+
+  const recBadge = document.getElementById("voice-rec-badge");
+  const statusText = document.getElementById("voice-rec-status-text");
+  if (!recBadge || !statusText) return;
+
+  recBadge.className = "voice-rec-badge";
+
+  switch (state) {
+    case AUDIO_STATE.IDLE:
+      recBadge.classList.add("idle");
+      statusText.innerHTML = '<i class="fa-solid fa-pause"></i> Ready (Mic Paused)';
+      break;
+
+    case AUDIO_STATE.LISTENING:
+      if (previewText) {
+        recBadge.classList.add("hearing");
+        const snippet = previewText.slice(-24);
+        statusText.innerHTML = `<i class="fa-solid fa-microphone-lines"></i> Hearing you "${snippet}"`;
+      } else if (countdownSecs < 3) {
+        recBadge.classList.add("countdown");
+        statusText.innerHTML = `<i class="fa-solid fa-hourglass-half"></i> Sending in ${countdownSecs}s...`;
+      } else {
+        recBadge.classList.add("listening");
+        statusText.innerHTML = '<i class="fa-solid fa-ear-listen"></i> Listening (Speak anytime)...';
+      }
+      break;
+
+    case AUDIO_STATE.PROCESSING:
+      recBadge.classList.add("processing");
+      statusText.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing speech...';
+      break;
+
+    case AUDIO_STATE.SPEAKING:
+      recBadge.classList.add("speaking");
+      statusText.innerHTML = '<i class="fa-solid fa-volume-high"></i> AI Speaking (Muted mic)';
+      break;
+
+    default:
+      recBadge.classList.add("idle");
+      statusText.textContent = state;
+  }
+}
+window.setAudioState = setAudioState;
+
+function setVoiceState(state, previewText = "", countdownSecs = 3) {
+  if (state === "AI_SPEAKING") {
+    setAudioState(AUDIO_STATE.SPEAKING, previewText, countdownSecs);
+  } else if (state === "SENDING") {
+    setAudioState(AUDIO_STATE.PROCESSING, previewText, countdownSecs);
+  } else if (state === "USER_SPEAKING" || state === "PAUSE_COUNTDOWN" || state === "LISTENING") {
+    setAudioState(AUDIO_STATE.LISTENING, previewText, countdownSecs);
+  } else if (state === "CONNECTING") {
+    currentAudioState = AUDIO_STATE.IDLE;
+    const recBadge = document.getElementById("voice-rec-badge");
+    const statusText = document.getElementById("voice-rec-status-text");
+    if (recBadge && statusText) {
+      recBadge.className = "voice-rec-badge connecting";
+      statusText.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Connecting mic...';
+    }
+  } else {
+    setAudioState(AUDIO_STATE.IDLE, previewText, countdownSecs);
+  }
+}
+window.setVoiceState = setVoiceState;
+
+let silenceWatcherTickCount = 0;
+
+function startVoiceSilenceWatcher() {
+  stopVoiceSilenceWatcher();
+  silenceWatcherTickCount = 0;
+
+  voiceSilenceMasterInterval = setInterval(() => {
+    if (!isContinuousVoiceMode) {
+      stopVoiceSilenceWatcher();
+      return;
+    }
+
+    // CRITICAL: Only monitor silence and countdown while in LISTENING state
+    if (currentAudioState !== AUDIO_STATE.LISTENING) {
+      return;
+    }
+
+    silenceWatcherTickCount++;
+    // Every ~1 second while in LISTENING, ensure recognition is running for user's next turn
+    if (silenceWatcherTickCount % 10 === 0) {
+      ensureSpeechRecognitionActive();
+      ensureMediaRecorderActive();
+    }
+
+    // If user has not spoken yet in this turn, keep in LISTENING
+    if (!hasSpokenInTurn) {
+      return;
+    }
+
+    // The user has spoken! Calculate silence elapsed since the last detected speech:
+    const silenceElapsed = Date.now() - lastVoiceActivityTime;
+
+    if (silenceElapsed >= 3000) {
+      // EXACTLY 3.0s OF SILENCE (NO HUMAN SPOKE) -> AUTO-SEND TURN HANDS-FREE!
+      console.log(`[Voice] 3.0s pause reached (${silenceElapsed}ms). Auto-submitting speech turn!`);
+      autoSendContinuousVoiceTurn();
+    } else if (silenceElapsed >= 400) {
+      // User paused speaking; countdown: 3s -> 2s -> 1s
+      const secsLeft = Math.max(1, Math.ceil((3000 - silenceElapsed) / 1000));
+      setAudioState(AUDIO_STATE.LISTENING, liveTranscribedSpeech, secsLeft);
+    } else {
+      // User is actively speaking
+      setAudioState(AUDIO_STATE.LISTENING, liveTranscribedSpeech);
+    }
+  }, 100);
+}
+
+function stopVoiceSilenceWatcher() {
+  if (voiceSilenceMasterInterval) {
+    clearInterval(voiceSilenceMasterInterval);
+    voiceSilenceMasterInterval = null;
+  }
+}
+
+function triggerImmediateSend() {
+  if (!isContinuousVoiceMode) return;
+  console.log("[Voice] User triggered immediate send.");
+  autoSendContinuousVoiceTurn();
+}
+window.triggerImmediateSend = triggerImmediateSend;
 
 function startAudioVisualizer(stream) {
   try {
@@ -860,7 +1218,7 @@ function startAudioVisualizer(stream) {
     const source = audioContext.createMediaStreamSource(stream);
     audioAnalyser = audioContext.createAnalyser();
     audioAnalyser.fftSize = 64;
-    audioAnalyser.smoothingTimeConstant = 0.4;
+    audioAnalyser.smoothingTimeConstant = 0.35;
     source.connect(audioAnalyser);
 
     const bufferLength = audioAnalyser.frequencyBinCount;
@@ -868,7 +1226,7 @@ function startAudioVisualizer(stream) {
     const bars = document.querySelectorAll(".voice-wave-bars .v-bar");
 
     function renderWaves() {
-      if (!isRecording) return;
+      if (!isContinuousVoiceMode && !isRecording) return;
       audioVisualizerFrame = requestAnimationFrame(renderWaves);
       audioAnalyser.getByteFrequencyData(dataArray);
 
@@ -881,14 +1239,38 @@ function startAudioVisualizer(stream) {
         maxAudioVolume = avg;
       }
 
+      // Visualizer bars bounce to show microphone is active
       bars.forEach((bar, index) => {
         const binIndex = Math.floor((index / bars.length) * (bufferLength / 2));
         const val = dataArray[binIndex] || 0;
-        // Dynamically scale height from 6px up to 36px based on real speech energy
         const height = Math.max(6, Math.min(36, Math.round(6 + (val / 160) * 30)));
         bar.style.height = `${height}px`;
         bar.style.opacity = Math.max(0.35, Math.min(1.0, 0.35 + (val / 150) * 0.65)).toFixed(2);
       });
+
+      // Adaptive Noise Tracking (Used strictly as fallback when browser has no SpeechRecognition API)
+      // When SpeechRecognition is active, it handles human voice phoneme detection exclusively,
+      // ensuring fan sounds, air conditioning, and room ambient noises never block pause or auto-send.
+      const hasNativeSpeechRec = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+      if (!hasNativeSpeechRec && isContinuousVoiceMode) {
+        if (ambientNoiseBaseline === 0) {
+          ambientNoiseBaseline = avg;
+        } else {
+          // Track room background noise / fan hum
+          ambientNoiseBaseline = ambientNoiseBaseline * 0.98 + avg * 0.02;
+        }
+
+        // Only count as human speech if audio surges substantially above the steady fan baseline
+        if (avg > ambientNoiseBaseline + 25 && avg > 32) {
+          lastVoiceActivityTime = Date.now();
+          hasSpokenInTurn = true;
+          handleBargeInInterruption();
+
+          if (voiceConversationState !== "USER_SPEAKING") {
+            setVoiceState("USER_SPEAKING", liveTranscribedSpeech);
+          }
+        }
+      }
     }
 
     renderWaves();
@@ -910,7 +1292,6 @@ function stopAudioVisualizer() {
   }
   audioAnalyser = null;
 
-  // Reset bar heights
   const bars = document.querySelectorAll(".voice-wave-bars .v-bar");
   bars.forEach(bar => {
     bar.style.height = "";
@@ -918,7 +1299,6 @@ function stopAudioVisualizer() {
   });
 }
 
-// Microphone Permission Modal Helpers
 function showMicPermissionModal(title, subtitle, statusText) {
   const modal = document.getElementById("mic-permission-modal");
   const titleEl = document.getElementById("mic-modal-title");
@@ -941,11 +1321,10 @@ window.closeMicPermissionModal = closeMicPermissionModal;
 
 function handleRetryMicPermission() {
   closeMicPermissionModal();
-  startVoiceRecording();
+  startContinuousVoiceMode();
 }
 window.handleRetryMicPermission = handleRetryMicPermission;
 
-// Listen to browser permission changes when supported
 if (navigator.permissions && navigator.permissions.query) {
   navigator.permissions.query({ name: "microphone" }).then(permissionStatus => {
     permissionStatus.onchange = () => {
@@ -957,14 +1336,13 @@ if (navigator.permissions && navigator.permissions.query) {
   }).catch(() => {});
 }
 
-async function startVoiceRecording() {
-  // 1. Check for secure context (Browsers block mic on remote plain HTTP)
+async function startContinuousVoiceMode() {
   const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
   if (!window.isSecureContext && !isLocal) {
     showMicPermissionModal(
       "HTTPS Connection Required",
       "Browsers block microphone recording over plain HTTP",
-      "Modern web browsers (Chrome, Edge, Safari, Firefox) strictly require an HTTPS (SSL) connection or localhost to allow microphone access. Please access via HTTPS or localhost."
+      "Modern web browsers strictly require an HTTPS (SSL) connection or localhost to allow microphone access. Please access via HTTPS or localhost."
     );
     return;
   }
@@ -978,17 +1356,25 @@ async function startVoiceRecording() {
     return;
   }
 
-  // 2. Open recording overlay UI with Connecting state
+  // Ensure speech output is enabled so user hears AI voice response
+  ttsEnabled = true;
+  localStorage.setItem("northstar_tts_enabled", "true");
+  updateTtsButtonUI();
+
+  isContinuousVoiceMode = true;
   isRecording = true;
   audioChunks = [];
   recordingSeconds = 0;
   maxAudioVolume = 0;
+  hasSpokenInTurn = false;
+  liveTranscribedSpeech = "";
+  accumulatedFinalText = "";
+  ambientNoiseBaseline = 0;
+  lastVoiceActivityTime = 0;
 
   const overlay = document.getElementById("voice-recording-overlay");
   const form = document.getElementById("chat-form");
   const btnRec = document.getElementById("btn-voice-record");
-  const recBadge = document.getElementById("voice-rec-badge");
-  const statusText = document.getElementById("voice-rec-status-text");
 
   if (overlay) {
     overlay.style.display = "flex";
@@ -996,12 +1382,10 @@ async function startVoiceRecording() {
   }
   if (form) form.style.display = "none";
   if (btnRec) btnRec.classList.add("recording-active");
-  if (recBadge) recBadge.classList.add("connecting");
-  if (statusText) statusText.textContent = "Connecting mic...";
 
+  setVoiceState("CONNECTING");
   updateTimerDisplay();
 
-  // 3. Request microphone access with tuned speech constraints
   const audioConstraints = {
     channelCount: 1,
     sampleRate: { ideal: 16000 },
@@ -1012,15 +1396,14 @@ async function startVoiceRecording() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-    if (!isRecording) {
-      // User cancelled before mic stream opened
+    if (!isContinuousVoiceMode) {
       stream.getTracks().forEach(t => t.stop());
       return;
     }
+
     currentMediaStream = stream;
     initMediaRecorder(stream);
-    
-    // Gather audio slices every 100ms
+
     try {
       mediaRecorder.start(100);
     } catch (e) {
@@ -1028,31 +1411,25 @@ async function startVoiceRecording() {
       mediaRecorder.start();
     }
 
-    // Microphone is now actively recording
     if (overlay) overlay.classList.add("live-active");
-    if (recBadge) {
-      recBadge.classList.remove("connecting");
-      recBadge.classList.remove("processing");
-    }
-    if (statusText) statusText.textContent = "REC (Speak now)";
-
     startAudioVisualizer(stream);
     startBrowserSpeechRecognition();
     closeMicPermissionModal();
 
-    // Start timer only when microphone hardware is live
+    setAudioState(AUDIO_STATE.LISTENING);
+    startVoiceSilenceWatcher();
+
     if (recordingTimerInterval) clearInterval(recordingTimerInterval);
     recordingTimerInterval = setInterval(() => {
       recordingSeconds++;
       updateTimerDisplay();
-      if (recordingSeconds >= 90) {
-        stopAndSendVoice();
-      }
     }, 1000);
+
+    showToast("🎙️ ChatGPT Voice Mode active! Speak anytime — automatically sends after a 3s pause.");
 
   } catch (err) {
     console.warn("Microphone access error:", err);
-    cleanupRecordingUI();
+    stopContinuousVoiceMode();
 
     if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
       showMicPermissionModal(
@@ -1067,34 +1444,87 @@ async function startVoiceRecording() {
     }
   }
 }
-window.startVoiceRecording = startVoiceRecording;
+window.startContinuousVoiceMode = startContinuousVoiceMode;
+window.startVoiceRecording = startContinuousVoiceMode; // alias for backwards compatibility
 
-function restartVoiceRecording() {
-  recordingSeconds = 0;
-  maxAudioVolume = 0;
-  updateTimerDisplay();
-  audioChunks = [];
+function stopContinuousVoiceMode() {
+  if (postTtsDelayTimer) {
+    clearTimeout(postTtsDelayTimer);
+    postTtsDelayTimer = null;
+  }
+  isContinuousVoiceMode = false;
+  isRecording = false;
+  hasSpokenInTurn = false;
+  liveTranscribedSpeech = "";
+  accumulatedFinalText = "";
+  ambientNoiseBaseline = 0;
+  lastVoiceActivityTime = 0;
+  stopVoiceSilenceWatcher();
 
-  if (mediaRecorder) {
+  if (activeVoiceAbortController) {
+    activeVoiceAbortController.abort();
+    activeVoiceAbortController = null;
+  }
+
+  stopCurrentAudio();
+
+  if (recordingTimerInterval) {
+    clearInterval(recordingTimerInterval);
+    recordingTimerInterval = null;
+  }
+
+  stopAudioVisualizer();
+  stopBrowserSpeechRecognition();
+
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
     mediaRecorder.onstop = null;
-    mediaRecorder.ondataavailable = null;
     try {
-      if (mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
-      }
+      mediaRecorder.stop();
     } catch (e) {}
   }
 
   if (currentMediaStream) {
-    initMediaRecorder(currentMediaStream);
-    try {
-      mediaRecorder.start(100);
-    } catch (e) {
-      console.warn("Error restarting MediaRecorder:", e);
-    }
+    currentMediaStream.getTracks().forEach(track => track.stop());
+    currentMediaStream = null;
   }
 
-  showToast("Recording restarted from 0:00. Speak now...");
+  audioChunks = [];
+
+  const overlay = document.getElementById("voice-recording-overlay");
+  const form = document.getElementById("chat-form");
+  const btnRec = document.getElementById("btn-voice-record");
+
+  if (btnRec) btnRec.classList.remove("recording-active");
+  if (overlay) {
+    overlay.style.display = "none";
+    overlay.classList.remove("live-active");
+  }
+  if (form) form.style.display = "";
+
+  setAudioState(AUDIO_STATE.IDLE);
+  showToast("Exited ChatGPT voice mode. Direct text input restored.");
+}
+window.stopContinuousVoiceMode = stopContinuousVoiceMode;
+window.cancelVoiceRecording = stopContinuousVoiceMode; // alias
+window.stopAndSendVoice = triggerImmediateSend; // alias
+
+function restartVoiceRecording() {
+  if (postTtsDelayTimer) {
+    clearTimeout(postTtsDelayTimer);
+    postTtsDelayTimer = null;
+  }
+  recordingSeconds = 0;
+  maxAudioVolume = 0;
+  hasSpokenInTurn = false;
+  liveTranscribedSpeech = "";
+  accumulatedFinalText = "";
+  ambientNoiseBaseline = 0;
+  audioChunks = [];
+  lastVoiceActivityTime = 0;
+  startVoiceSilenceWatcher();
+  updateTimerDisplay();
+  setAudioState(AUDIO_STATE.LISTENING);
+  showToast("Recording reset to 0:00. Listening...");
 }
 window.restartVoiceRecording = restartVoiceRecording;
 
@@ -1106,121 +1536,83 @@ function updateTimerDisplay() {
   timerElem.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
-function cleanupRecordingUI() {
-  isRecording = false;
-  if (recordingTimerInterval) {
-    clearInterval(recordingTimerInterval);
-    recordingTimerInterval = null;
+async function autoSendContinuousVoiceTurn() {
+  if (!isContinuousVoiceMode) return;
+  // Guard against calling while already PROCESSING, SPEAKING, or in post-TTS IDLE
+  if (currentAudioState === AUDIO_STATE.PROCESSING || currentAudioState === AUDIO_STATE.SPEAKING || currentAudioState === AUDIO_STATE.IDLE) {
+    console.warn(`[Voice] autoSendContinuousVoiceTurn rejected: already in ${currentAudioState} state.`);
+    return;
   }
-  stopAudioVisualizer();
-  stopBrowserSpeechRecognition();
 
-  const overlay = document.getElementById("voice-recording-overlay");
-  const form = document.getElementById("chat-form");
-  const btnRec = document.getElementById("btn-voice-record");
-  const recBadge = document.getElementById("voice-rec-badge");
-  const statusText = document.getElementById("voice-rec-status-text");
-
-  if (btnRec) btnRec.classList.remove("recording-active");
-  if (overlay) {
-    overlay.style.display = "none";
-    overlay.classList.remove("live-active");
-  }
-  if (form) form.style.display = "";
-  if (recBadge) {
-    recBadge.classList.remove("connecting");
-    recBadge.classList.remove("processing");
-  }
-  if (statusText) statusText.textContent = "REC";
-}
-
-function cancelVoiceRecording() {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.onstop = null;
+  // Flush any pending audio slice from MediaRecorder
+  if (mediaRecorder && mediaRecorder.state === "recording") {
     try {
-      mediaRecorder.stop();
+      mediaRecorder.requestData();
     } catch (e) {}
   }
-  if (currentMediaStream) {
-    currentMediaStream.getTracks().forEach(track => track.stop());
-    currentMediaStream = null;
-  }
+
+  const textToSend = (liveTranscribedSpeech || accumulatedFinalText || "").trim();
+  const chunksToSend = audioChunks.slice();
+
+  // Reset speech buffers for this upcoming turn
+  hasSpokenInTurn = false;
+  liveTranscribedSpeech = "";
+  accumulatedFinalText = "";
   audioChunks = [];
-  cleanupRecordingUI();
-  showToast("Voice recording cancelled.");
-}
-window.cancelVoiceRecording = cancelVoiceRecording;
+  lastVoiceActivityTime = 0;
 
-async function stopAndSendVoice() {
-  if (!isRecording) return;
+  // HUMAN VOICE VALIDATION:
+  // If SpeechRecognition is supported in browser, require that human words were actually transcribed.
+  // Ambient room sounds, fan hum, or background noises produce empty text — so we stay silent in LISTENING.
+  const hasNativeSpeechRec = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  if (hasNativeSpeechRec && (!textToSend || textToSend.length < 2)) {
+    console.log("[Voice] No human words detected in turn (fan/ambient sound rejected). Staying silent in LISTENING.");
+    setAudioState(AUDIO_STATE.LISTENING);
+    return;
+  }
 
-  const recBadge = document.getElementById("voice-rec-badge");
-  const statusText = document.getElementById("voice-rec-status-text");
-  if (recBadge) recBadge.classList.add("processing");
-  if (statusText) statusText.textContent = "Processing speech...";
+  // If no native speech recognition API is available on browser, ensure audio chunks exist
+  if (!hasNativeSpeechRec && !textToSend && chunksToSend.length === 0) {
+    setAudioState(AUDIO_STATE.LISTENING);
+    return;
+  }
 
-  stopAudioVisualizer();
-
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.onstop = async () => {
-      if (currentMediaStream) {
-        currentMediaStream.getTracks().forEach(track => track.stop());
-        currentMediaStream = null;
-      }
-      cleanupRecordingUI();
-
-      const totalBytes = audioChunks.reduce((acc, c) => acc + (c.size || 0), 0);
-      if (audioChunks.length === 0 || totalBytes < 400) {
-        showToast("Recording was too short. Please speak clearly into your mic and try again.");
-        return;
-      }
-
-      if (maxAudioVolume < 3) {
-        showToast("Low or no microphone sound was detected. Please verify your mic is unmuted and speak clearly.");
-      }
-
-      const mime = mediaRecorder.mimeType || "audio/webm";
-      const audioBlob = new Blob(audioChunks, { type: mime });
-      await processVoiceAudioBlob(audioBlob);
-    };
-
-    try {
-      mediaRecorder.stop();
+  // ECHO FEEDBACK GUARD:
+  // Reject if the captured text is just an echo of the assistant's own response coming out of the speakers
+  if (lastAssistantResponseText && textToSend) {
+    const cleanUser = textToSend.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanAi = lastAssistantResponseText.replace(/[^a-z0-9]/g, '');
+    if (cleanUser.length > 8 && cleanAi.includes(cleanUser)) {
+      console.warn("[Voice] Discarded speaker audio feedback echo:", textToSend);
+      setAudioState(AUDIO_STATE.LISTENING);
+      hasSpokenInTurn = false;
+      liveTranscribedSpeech = "";
+      accumulatedFinalText = "";
+      audioChunks = [];
+      lastVoiceActivityTime = 0;
       return;
-    } catch (e) {
-      console.warn("Error stopping media recorder:", e);
     }
   }
 
-  // Fallback if mediaRecorder was not running
-  if (currentMediaStream) {
-    currentMediaStream.getTracks().forEach(track => track.stop());
-    currentMediaStream = null;
-  }
-  cleanupRecordingUI();
-
-  if (audioChunks && audioChunks.length > 0) {
-    const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-    await processVoiceAudioBlob(audioBlob);
-  } else {
-    showToast("No voice recorded. Please allow microphone access to talk with AI.");
-  }
-}
-window.stopAndSendVoice = stopAndSendVoice;
-
-async function processVoiceAudioBlob(blob) {
+  // Workflow transition: LISTENING -> PROCESSING
+  setAudioState(AUDIO_STATE.PROCESSING);
   showTyping(true);
-  chatInput.disabled = true;
-  btnSend.disabled = true;
+
+  // Stop browser speech recognition so no interim events fire during fetch
+  stopBrowserSpeechRecognition();
+  activeVoiceAbortController = new AbortController();
 
   try {
     const formData = new FormData();
-    const ext = blob.type.includes("mp4") ? "mp4" : "webm";
-    formData.append("audio", blob, `voice_recording.${ext}`);
+    const mime = mediaRecorder ? (mediaRecorder.mimeType || "audio/webm") : "audio/webm";
+    const ext = mime.includes("mp4") ? "mp4" : "webm";
+    const audioBlob = chunksToSend.length > 0 ? new Blob(chunksToSend, { type: mime }) : new Blob(["dummy"], { type: "audio/webm" });
+
+    formData.append("audio", audioBlob, `voice_recording.${ext}`);
     formData.append("language", currentLanguage);
     formData.append("tts_enabled", isNavbarSpeakEnabled() ? "true" : "false");
-    if (liveTranscribedSpeech && liveTranscribedSpeech.trim().length > 1) {
-      formData.append("client_transcript", liveTranscribedSpeech.trim());
+    if (textToSend) {
+      formData.append("client_transcript", textToSend);
     }
     if (currentSessionId) {
       formData.append("session_id", currentSessionId);
@@ -1228,7 +1620,8 @@ async function processVoiceAudioBlob(blob) {
 
     const res = await fetch("/api/voice/chat", {
       method: "POST",
-      body: formData
+      body: formData,
+      signal: activeVoiceAbortController.signal
     });
 
     if (!res.ok) {
@@ -1236,34 +1629,47 @@ async function processVoiceAudioBlob(blob) {
     }
 
     const data = await res.json();
+    activeVoiceAbortController = null;
+    showTyping(false);
 
     if (!data.success) {
-      showTyping(false);
-      showToast(data.message || "Could not transcribe audio. Please try speaking again.");
+      showToast(data.message || "Could not understand speech. Please speak again.");
+      if (isContinuousVoiceMode) {
+        transitionAfterTTS();
+      }
       return;
     }
 
-    // 1. Show user transcribed text in chat bubble with microphone icon
-    appendUserBubble(data.user_text, true);
+    // 1. Append user transcribed message
+    appendUserBubble(data.user_text || textToSend, true);
 
-    // 2. Update session
+    // 2. Update session state
     currentSessionId = data.session_id;
     localStorage.setItem("northstar_session_id", currentSessionId);
     lastState = data.state;
 
-    // 3. Render Assistant reply bubble with cards & quick replies
-    showTyping(false);
-    appendAssistantBubble(data.reply, data.options, data.quick_replies, data.booking, data.audio_base64);
+    // 3. Render Assistant reply bubble with cards & quick replies, and seamlessly wire voice completion
+    appendAssistantBubble(
+      data.reply,
+      data.options,
+      data.quick_replies,
+      data.booking,
+      data.audio_base64,
+      transitionAfterTTS
+    );
 
   } catch (err) {
     showTyping(false);
-    console.error("Voice processing error:", err);
-    appendAssistantBubble("Sorry, I encountered an error processing your voice recording. Please check your mic or try typing your message.");
-  } finally {
-    chatInput.disabled = false;
-    btnSend.disabled = false;
-    chatInput.focus();
-    scrollToBottom();
+    activeVoiceAbortController = null;
+    if (err.name === "AbortError") {
+      console.log("[Voice] In-flight request was interrupted by new user speech.");
+    } else {
+      console.warn("Voice turn processing error:", err);
+      showToast("Error processing voice turn. Listening again...");
+      if (isContinuousVoiceMode) {
+        transitionAfterTTS();
+      }
+    }
   }
 }
 
@@ -1277,24 +1683,27 @@ function playAudio(audioDataUri, onEndCallback = null) {
   stopCurrentAudio();
   try {
     currentAudioPlayer = new Audio(audioDataUri);
-    currentAudioPlayer.onended = () => {
-      currentAudioPlayer = null;
-      if (onEndCallback) onEndCallback();
+    let finished = false;
+    const done = () => {
+      if (!finished) {
+        finished = true;
+        currentAudioPlayer = null;
+        if (typeof onEndCallback === "function") onEndCallback();
+      }
     };
+    currentAudioPlayer.onended = done;
     currentAudioPlayer.onerror = (e) => {
       console.warn("Audio playback error:", e);
-      currentAudioPlayer = null;
-      if (onEndCallback) onEndCallback();
+      done();
     };
     currentAudioPlayer.play().catch(err => {
       console.warn("Autoplay was prevented by browser policy:", err);
-      currentAudioPlayer = null;
-      if (onEndCallback) onEndCallback();
+      done();
     });
   } catch (e) {
     console.warn("playAudio failed:", e);
     currentAudioPlayer = null;
-    if (onEndCallback) onEndCallback();
+    if (typeof onEndCallback === "function") onEndCallback();
   }
 }
 
@@ -1307,7 +1716,9 @@ function stopCurrentAudio() {
     currentAudioPlayer = null;
   }
   if (window.speechSynthesis) {
-    window.speechSynthesis.cancel();
+    try {
+      window.speechSynthesis.cancel();
+    } catch (e) {}
   }
 }
 
@@ -1378,13 +1789,18 @@ function getStrictFemaleVoice(targetLang) {
   return selected;
 }
 
-function speakViaBrowserTTS(text) {
-  if (!window.speechSynthesis) return;
+function speakViaBrowserTTS(text, onEndCallback = null) {
+  if (!window.speechSynthesis) {
+    if (typeof onEndCallback === "function") onEndCallback();
+    return;
+  }
   if (!isNavbarSpeakEnabled()) {
     stopCurrentAudio();
+    if (typeof onEndCallback === "function") onEndCallback();
     return;
   }
   stopCurrentAudio();
+
   try {
     const clean = text
       .replace(/[*_#`~]/g, '')
@@ -1407,11 +1823,107 @@ function speakViaBrowserTTS(text) {
       utterance.voice = femaleVoice;
     }
 
+    let finished = false;
+    let safetyTimer = null;
+    const onDone = () => {
+      if (!finished) {
+        finished = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (typeof onEndCallback === "function") onEndCallback();
+      }
+    };
+
+    utterance.onend = onDone;
+    utterance.onerror = (e) => {
+      console.warn("Browser SpeechSynthesis error:", e);
+      onDone();
+    };
+
+    // Watchdog safety timeout in case browser drops onend
+    const estimatedDuration = Math.max(1500, clean.length * 85);
+    safetyTimer = setTimeout(onDone, estimatedDuration + 1500);
+
     window.speechSynthesis.speak(utterance);
   } catch (e) {
     console.warn("Browser speech synthesis error:", e);
+    if (typeof onEndCallback === "function") onEndCallback();
   }
 }
+
+// --------------------------------------------------------------------------
+// Unified TTS Playback with Audio State Lifecycle Management
+// Ensures SPEAKING state is set BEFORE audio begins and maintained until complete
+// --------------------------------------------------------------------------
+function playTTSWithLifecycle(audioBase64, text, onComplete) {
+  // CRITICAL: Immediately enter SPEAKING state before sound starts
+  if (isContinuousVoiceMode) {
+    setAudioState(AUDIO_STATE.SPEAKING);
+    // Mute microphone capture immediately: stop speech recognition & discard buffer
+    stopBrowserSpeechRecognition();
+    audioChunks = [];
+    liveTranscribedSpeech = "";
+    accumulatedFinalText = "";
+    hasSpokenInTurn = false;
+    lastVoiceActivityTime = 0;
+  }
+
+  let completed = false;
+  const finishOnce = () => {
+    if (!completed) {
+      completed = true;
+      if (typeof onComplete === "function") {
+        onComplete();
+      }
+    }
+  };
+
+  if (!isNavbarSpeakEnabled() || !text || text.trim().length === 0) {
+    stopCurrentAudio();
+    finishOnce();
+    return;
+  }
+
+  // 1. If we have audioBase64 from Edge TTS
+  if (audioBase64) {
+    playAudio(audioBase64, finishOnce);
+    return;
+  }
+
+  // 2. Fetch server Edge TTS audio stream, fallback to female browser TTS
+  try {
+    const cleanSnippet = text.replace(/[*_#`~]/g, '').trim().substring(0, 600);
+    const audioUrl = `/api/voice/tts?text=${encodeURIComponent(cleanSnippet)}&lang=${encodeURIComponent(currentLanguage || 'en')}`;
+    const tempAudio = new Audio(audioUrl);
+
+    tempAudio.oncanplaythrough = () => {
+      if (!isNavbarSpeakEnabled()) {
+        finishOnce();
+        return;
+      }
+      stopCurrentAudio();
+      currentAudioPlayer = tempAudio;
+      tempAudio.onended = () => {
+        currentAudioPlayer = null;
+        finishOnce();
+      };
+      tempAudio.onerror = () => {
+        currentAudioPlayer = null;
+        speakViaBrowserTTS(text, finishOnce);
+      };
+      tempAudio.play().catch(() => {
+        currentAudioPlayer = null;
+        speakViaBrowserTTS(text, finishOnce);
+      });
+    };
+
+    tempAudio.onerror = () => {
+      speakViaBrowserTTS(text, finishOnce);
+    };
+  } catch (e) {
+    speakViaBrowserTTS(text, finishOnce);
+  }
+}
+window.playTTSWithLifecycle = playTTSWithLifecycle;
 
 window.handleMessageAudioClick = async function(btn, msgId) {
   if (!isNavbarSpeakEnabled()) {
@@ -1432,6 +1944,9 @@ window.handleMessageAudioClick = async function(btn, msgId) {
     stopCurrentAudio();
     btn.classList.remove("playing");
     btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+    if (isContinuousVoiceMode) {
+      transitionAfterTTS();
+    }
     return;
   }
 
@@ -1447,32 +1962,15 @@ window.handleMessageAudioClick = async function(btn, msgId) {
   const resetBtn = () => {
     btn.classList.remove("playing");
     btn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
+    if (isContinuousVoiceMode) {
+      transitionAfterTTS();
+    }
   };
 
   const audioBase64 = row.dataset.audioBase64;
   const text = row.dataset.msgText || "";
 
-  if (audioBase64) {
-    playAudio(audioBase64, resetBtn);
-  } else {
-    try {
-      const res = await fetch(`/api/voice/tts?text=${encodeURIComponent(text.substring(0, 320))}&lang=${encodeURIComponent(currentLanguage)}`);
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        playAudio(url, () => {
-          URL.revokeObjectURL(url);
-          resetBtn();
-        });
-      } else {
-        speakViaBrowserTTS(text);
-        setTimeout(resetBtn, 4000);
-      }
-    } catch (e) {
-      speakViaBrowserTTS(text);
-      setTimeout(resetBtn, 4000);
-    }
-  }
+  playTTSWithLifecycle(audioBase64, text, resetBtn);
 };
 
 // Render Interactive Option Cards directly inside Assistant message
